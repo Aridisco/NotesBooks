@@ -8,7 +8,6 @@ import { FB_CONFIG } from './config.js';
 import { THC, lsw } from './env.js';
 import { draw } from './render.js';
 import { render } from './notebooks.js';
-import { side } from './sidebar.js';
 
 ST.acctHTML = '';
 const setAcct = h => {
@@ -168,8 +167,6 @@ async function pull(m, merge) {
     ST.hist = [JSON.stringify(P().els)];
     ST.hi = 0;
     ST.sel = null;
-    $('#pgname').textContent = P().name;
-    side();
     render();
     draw();
     setStat('☁ synced');
@@ -207,7 +204,6 @@ async function resolveConflict(m) {
       });
       if (mine.length) {
         ST.S.ts = Date.now();
-        side();
         render();
       }
     }
@@ -315,7 +311,7 @@ export async function cloudInit() {
         setAcct('<button class="gbtn" data-si>Sign in with Google</button>');
         return;
       }
-      setAcct('<span>' + esc(u.displayName || u.email || 'Signed in') + '</span><button class="gbtn" data-sv title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">💾 Save</button><button class="gbtn" data-sy title="Replace this device with the cloud copy" aria-label="Replace this device with the cloud copy">Load from cloud</button><button class="gbtn" data-so>Sign out</button>');
+      setAcct('<span>' + esc(u.displayName || u.email || 'Signed in') + '</span><button class="gbtn" data-sv title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">' + I.deviceFloppy + 'Save</button><button class="gbtn" data-sy title="Replace this device with the cloud copy" aria-label="Replace this device with the cloud copy">Load from cloud</button><button class="gbtn" data-so>Sign out</button>');
       cuid = u.uid;
       ST.ready = false;
       ST.cdb = fs.collection('users').doc(u.uid).collection('sketchbooks');

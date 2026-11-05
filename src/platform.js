@@ -1,9 +1,7 @@
 import { ST } from './state.js';
-import { $ } from './util.js';
 import { resize } from './env.js';
 
 /* full screen */
-let FSS = false;
 export function toggleFS() {
   const d = document,
     el = d.documentElement;
@@ -12,11 +10,6 @@ export function toggleFS() {
   } catch (e) {}
 }
 ['fullscreenchange', 'webkitfullscreenchange'].forEach(n => document.addEventListener(n, () => {
-  const f = !!(document.fullscreenElement || document.webkitFullscreenElement);
-  if (f) {
-    FSS = $('#side').classList.contains('hide');
-    $('#side').classList.add('hide');
-  } else if (FSS === false) $('#side').classList.remove('hide');
   setTimeout(resize, 80);
 }));
 /* battery */

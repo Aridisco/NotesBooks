@@ -6,7 +6,6 @@ import { A4H, A4W, bb, cl, commit, draw, drawR, fitA4, tfit } from './render.js'
 import { render } from './notebooks.js';
 import { bkBmp } from './books.js';
 import { props } from './toolbar.js';
-import { side } from './sidebar.js';
 import { isValidBackup } from './backup.js';
 import { codeFit } from './code.js';
 import { buildPdf } from './pdf.js';
@@ -302,7 +301,6 @@ export async function exportPDF(pages, name) {
     type: 'application/pdf'
   }), name + '.pdf');
 }
-$('#exp').onclick = exportPNG;
 $('#bak').onclick = () => dl(new Blob([JSON.stringify({
   nbs: ST.S.nbs
 })], {
@@ -332,7 +330,6 @@ $('#ifile').onchange = async e => {
     });
     ST.S.view = 'shelf';
     save();
-    side();
     render();
   } catch (er) {
     alert('Not a valid backup file');

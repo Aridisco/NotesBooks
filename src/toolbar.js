@@ -1,9 +1,9 @@
 import { P, ST } from './state.js';
 import { $, cv, esc, uid } from './util.js';
 import { doSave, save, saveBtn } from './cloud.js';
-import { BG, CC, FF, FSOK, resize } from './env.js';
+import { BG, CC, FF, FSOK, THC, resize } from './env.js';
 import { OX, commit, draw, fitA4, spreadOf, tfit, undo } from './render.js';
-import { nbOf } from './notebooks.js';
+import { endRename, load, nbOf, render } from './notebooks.js';
 import { ALN, ahHTML, align, cur, dssHTML, dupe, fitAll, selIds, union, zord } from './edit.js';
 import { togglePal } from './circuit.js';
 import { TBB, linkEd, tbl } from './objects.js';
@@ -12,7 +12,6 @@ import { togglePanel } from './voice.js';
 import { I } from './icons.js';
 import { codeFit } from './code.js';
 import { LANGS } from './highlight.js';
-import { side } from './sidebar.js';
 import { exportPNG } from './edit.js';
 import { exportBookPDF, exportPagePDF, openPalette, pageHistory } from './palette.js';
 
@@ -20,7 +19,7 @@ import { exportBookPDF, exportPagePDF, openPalette, pageHistory } from './palett
 const SHAPES = [['rect', 'square', 'Rectangle (R)'], ['diamond', 'diamond', 'Diamond (D)'], ['ellipse', 'circle', 'Ellipse (O)'], ['arrow', 'arrowUpRight', 'Arrow (A)'], ['curve', 'arrowCurveRight', 'Curved arrow (C)'], ['line', 'line', 'Line (L)']];
 const MORE = [['eraser', 'eraser', 'Eraser (E)'], ['hand', 'handStop', 'Pan (H)'], ['math', 'mathFunction', 'Formula (M)'], ['img', 'photo', 'Image'], ['table', 'table', 'Table']];
 const CIRC = [['wire', 'bolt', 'Wire (orthogonal)'], ['cpal', 'bolt', 'Circuit components']];
-const SC = ['auto', '#e03131', '#2f9e44', '#1971c2', '#f08c00'];
+const SC = ['auto', '#e03131', '#f08c00', '#2f9e44', '#1971c2', '#74c0fc', '#c2255c', '#7048e8'];
 const FC = ['none', '#ffc9c9', '#b2f2bb', '#a5d8ff', '#ffec99'];
 const PRESETS = { h1: 48, h2: 36, h3: 28, body: 24 };
 const SIZABLE = ['rect', 'diamond', 'ellipse', 'img', 'math', 'table', 'comp'];
@@ -47,13 +46,16 @@ function renderTools() {
   const shape = SHAPES.find(x => x[0] === ST.shape) || SHAPES[0];
   const isShape = SHAPES.some(x => x[0] === t);
   const isMore = MORE.some(x => x[0] === t) || t === 'wire' || t === 'comp';
-  $('#tools').innerHTML =
+  const sel = P().els.find(e => e.id === ST.sel), stroke = sel ? sel.stroke : ST.stroke, sw = sel ? sel.sw : ST.sw;
+  // Notability-style: colors + stroke widths on top, tools below
+  $('#tools').innerHTML = '<div class="trow">' + SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '<span class="sep"></span>' +
+    [1, 2, 4].map(w => `<button class="wd${sw === w ? ' on' : ''}" data-w="${w}" aria-label="Line width ${w}"><i style="width:${w * 3 + 3}px;height:${w * 3 + 3}px"></i></button>`).join('') + '</div><div class="trow">' +
     ib('pointer', 'Select (V)', 'data-t="select" aria-pressed="' + (t === 'select') + '"', t === 'select') +
     ib('pencil', 'Draw (P)', 'data-t="free" aria-pressed="' + (t === 'free') + '"', t === 'free') +
     ib(shape[1], 'Shapes: ' + shape[2], 'data-g="shapes" aria-haspopup="true"', isShape) +
     ib('typography', 'Text (T)', 'data-t="text" aria-pressed="' + (t === 'text') + '"', t === 'text') +
     ib('code', 'Code block (K)', 'data-t="code" aria-pressed="' + (t === 'code') + '"', t === 'code') +
-    ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore);
+    ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore) + '</div>';
 }
 function openPop(g) {
   const pop = $('#toolpop');
@@ -70,12 +72,12 @@ export function setTool(t) {
   if (SHAPES.some(x => x[0] === t)) ST.shape = t;
   cv.style.cursor = t === 'select' ? 'default' : t === 'hand' ? 'grab' : t === 'text' || t === 'code' ? 'text' : 'crosshair';
   closePops();
-  renderTools();
   props();
 }
 function toolClick(e) {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.s || b.dataset.w) return propsClick(e);
   if (b.dataset.g) return openPop(b.dataset.g);
   const t = b.dataset.t;
   if (!t) return;
@@ -84,6 +86,10 @@ function toolClick(e) {
 }
 $('#tools').onclick = toolClick;
 $('#toolpop').onclick = toolClick;
+// Tapping anywhere outside an open menu closes it.
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('#pgpop,#toolpop,#bkpop,[aria-haspopup]')) closePops();
+}, true);
 
 /* ---------- properties: top bar, contextual bar, panel ---------- */
 const swatch = (kind, c, cur_) => {
@@ -95,10 +101,15 @@ const swatch = (kind, c, cur_) => {
 const customColor = (kind, value, label) => `<label class="cc" title="${label}"><input type="color" data-cs="${kind}" value="${hex(value, '#000000')}" aria-label="${label}"></label>`;
 const numField = (k, label, v, min, max, step = 1) => `<label class="nf"><span>${label}</span><input type="number" data-n="${k}" value="${Math.round(v * 100) / 100}" min="${min}" max="${max}" step="${step}" inputmode="decimal"></label>`;
 
+// Page navigation bar: back to the notebook, page title and switcher, then history, view and menus.
 function topHTML() {
-  return ib('arrowBackUp', 'Undo (Ctrl+Z)', 'data-a="u"') + ib('arrowForwardUp', 'Redo', 'data-a="r"') +
-    '<span class="sep"></span>' + ib('minus', 'Zoom out', 'data-a="zo"') + '<span id="zoomv" class="zv"></span>' + ib('plus', 'Zoom in', 'data-a="zi"') + ib('arrowsMaximize', 'Fit to content', 'data-a="fit"') +
-    '<span class="sep"></span>' + saveBtn() + ib('settings', 'Page and app menu', 'data-a="menu" aria-haspopup="true"');
+  const p = P(), n = nbOf(p.id), i = n.pages.indexOf(p);
+  const title = ST.ren === p.id ? `<input class="ptitle" data-r="${p.id}" value="${esc(p.name)}" aria-label="Page name">` : `<button class="ptitle" data-a="ren" title="Rename page">${esc(p.name)}</button>`;
+  return `<div class="nl"><button class="back" data-a="back" title="Back to ${esc(n.name)}">${I.chevronLeft}<span>${esc(n.name)}</span></button></div>` +
+    `<div class="nc">${title}<span class="pager">` + ib('chevronLeft', 'Previous page (Page Up)', 'data-a="pp"' + (i ? '' : ' disabled')) + `<span class="pgn" aria-live="polite">${i + 1} / ${n.pages.length}</span>` + ib('chevronRight', 'Next page (Page Down)', 'data-a="pn"' + (i < n.pages.length - 1 ? '' : ' disabled')) + ib('filePlus', 'New page', 'data-a="np"') + '</span></div>' +
+    '<div class="nr">' + ib('arrowBackUp', 'Undo (Ctrl+Z)', 'data-a="u"') + ib('arrowForwardUp', 'Redo (Ctrl+Shift+Z)', 'data-a="r"') +
+    '<span class="sep"></span><span class="zoom">' + ib('minus', 'Zoom out', 'data-a="zo"') + '<button id="zoomv" class="zv" data-a="fit" title="Fit to content" aria-label="Zoom level, tap to fit"></button>' + ib('plus', 'Zoom in', 'data-a="zi"') + '</span>' +
+    '<span class="sep"></span>' + (ST.cdb ? saveBtn() : '') + ib('share', 'Export and share', 'data-a="m-share" aria-haspopup="true"') + ib('fileSettings', 'Paper: sheet, background, pattern', 'data-a="m-page" aria-haspopup="true"') + ib('dotsVertical', 'More: tools, settings, appearance', 'data-a="m-more" aria-haspopup="true"') + '</div>';
 }
 function ctxHTML(s) {
   const c = cur();
@@ -148,7 +159,15 @@ function panelHTML(s) {
 export function props() {
   const s = P().els.find(e => e.id === ST.sel);
   const c = cur();
-  $('#topr').innerHTML = topHTML();
+  renderTools();
+  if (ST.S.view === 'page') {
+    $('#topr').innerHTML = topHTML();
+    const ri = $('#topr input[data-r]');
+    if (ri) {
+      ri.focus();
+      ri.select();
+    }
+  }
   const ctx = $('#ctx');
   ctx.innerHTML = c.length ? ctxHTML(s) : '';
   ctx.dataset.on = c.length ? '1' : '';
@@ -176,9 +195,9 @@ export function placeCtx() {
   const W = cv.clientWidth, H = cv.clientHeight;
   const left = Math.max(8, Math.min(W - ctxW - 8, x + U.w * v.z / 2 - ctxW / 2));
   let top = y - 68;
-  if (top < 64) top = Math.min(H - 130, y + U.h * v.z + 12);
+  if (top < 72) top = Math.min(H - 190, y + U.h * v.z + 12);
   el.style.left = left + 'px';
-  el.style.top = Math.max(64, top) + 'px';
+  el.style.top = Math.max(72, top) + 'px';
 }
 
 /* numbers and colors typed or picked in the bar/panel */
@@ -256,16 +275,29 @@ const settle = e => {
     props();
   } else if (t.id === 'rgs' && P().els.find(q => q.id === ST.sel)) commit();
 };
-['#ctx', '#panel', '#pgpop'].forEach(s => {
+['#tools', '#ctx', '#panel', '#pgpop'].forEach(s => {
   $(s).addEventListener('input', live);
   $(s).addEventListener('change', settle);
 });
 
+/* ---------- appearance: two skins (paper, minimal), each light + dark ---------- */
+const isDark = () => {
+  const m = document.documentElement.dataset.theme;
+  return m ? m === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
+export function setAppearance(k, v) {
+  const r = document.documentElement.dataset;
+  if (k === 'skin') v === 'paper' ? delete r.skin : r.skin = v;
+  else v === 'auto' ? delete r.theme : r.theme = v;
+  try {
+    localStorage.setItem('sketchbooks-theme', JSON.stringify({ skin: r.skin, mode: r.theme }));
+  } catch (e) {}
+  for (const c in CC) delete CC[c];
+  THC.clear();
+  if (ST.S.view === 'page') draw();else render();
+}
 export function toggleTheme() {
-  const r = document.documentElement,
-    dk = getComputedStyle(r).getPropertyValue('--bg').trim() === '#14171d';
-  r.dataset.theme = dk ? 'light' : 'dark';
-  for (const k in CC) delete CC[k];
+  setAppearance('mode', isDark() ? 'light' : 'dark');
 }
 function propsClick(e) {
   const b = e.target.closest('button');
@@ -296,8 +328,33 @@ function propsClick(e) {
     props();
     return;
   }
-  if (d.a === 'menu') {
-    pgpop();
+  if (d.a && d.a.startsWith('m-')) {
+    pgpop(d.a.slice(2), b);
+    return;
+  }
+  if (d.a === 'back') {
+    closePops();
+    ST.S.view = 'book';
+    ST.S.book = nbOf(ST.S.cur).id;
+    render();
+    return;
+  }
+  if (d.a === 'ren') {
+    ST.ren = P().id;
+    props();
+    return;
+  }
+  if (d.a === 'pp' || d.a === 'pn') return goPage(d.a === 'pn' ? 1 : -1);
+  if (d.a === 'np') {
+    const n = nbOf(P().id), p = { id: uid(), name: 'Page ' + (n.pages.length + 1), els: [], v: { x: 0, y: 0, z: 1 }, mode: P().mode, pat: P().pat, bg: P().bg };
+    n.pages.splice(n.pages.indexOf(P()) + 1, 0, p);
+    ST.S.cur = p.id;
+    save();
+    return load();
+  }
+  if (d.a === 'bak' || d.a === 'imp') {
+    closePops();
+    $('#' + d.a).click();
     return;
   }
   if (d.a === 'u') undo(-1);
@@ -331,7 +388,7 @@ function propsClick(e) {
     const n = nbOf(ST.S.cur),
       h = $('#bkpop');
     closePops();
-    h.innerHTML = (n.books || []).map(b => `<button class="b" data-bk="${b.id}">📖 ${esc(b.title)}</button>`).join('') || '<small>No linked books on this notebook yet.</small>';
+    h.innerHTML = (n.books || []).map(b => `<button class="b" data-bk="${b.id}">${I.book}${esc(b.title)}</button>`).join('') || '<small>No linked books on this notebook yet.</small>';
     h.hidden = false;
     return;
   }
@@ -395,27 +452,77 @@ function propsClick(e) {
   props();
 }
 ['#topr', '#ctx', '#panel'].forEach(s => $(s).onclick = propsClick);
+$('#topr').addEventListener('focusout', e => {
+  if (e.target.dataset.r && ST.ren) endRename(e.target);
+});
+$('#topr').addEventListener('keydown', e => {
+  if (!e.target.dataset.r) return;
+  if (e.key === 'Enter') endRename(e.target);
+  if (e.key === 'Escape') {
+    ST.ren = null;
+    props();
+  }
+});
+export function goPage(dir) {
+  const n = nbOf(P().id), p = n.pages[n.pages.indexOf(P()) + dir];
+  if (!p) return;
+  ST.S.cur = p.id;
+  save();
+  load();
+}
 
 /* ---------- page and app menu ---------- */
-const mb = (label, attrs, on) => `<button class="b${on ? ' on' : ''}" ${attrs}>${label}</button>`;
-function pgpop() {
-  const p = P(),
-    h = $('#pgpop'),
-    was = !h.hidden;
+const mb = (label, attrs, on) => `<button class="b${on ? ' on' : ''}" ${attrs} aria-pressed="${!!on}">${label}</button>`;
+const mi = (icon, label, attrs) => `<button class="mi" ${attrs}>${I[icon]}<span>${label}</span></button>`;
+const seg = (title, items) => `<b>${title}</b><div class="seg">${items}</div>`;
+function appearanceHTML() {
+  const r = document.documentElement.dataset;
+  return seg('Theme', [['paper', 'Warm paper'], ['minimal', 'Minimal']].map(x => mb(x[1], 'data-sk="' + x[0] + '"', (r.skin || 'paper') === x[0])).join('')) +
+    seg('Appearance', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(x => mb(x[1], 'data-md="' + x[0] + '"', (r.theme || 'auto') === x[0])).join(''));
+}
+function menuHTML(m) {
+  const p = P();
+  if (m === 'share') return '<b>Export</b>' + mi('photo', 'Page as image (PNG)', 'data-a="png"') + mi('fileTypePdf', 'Page as PDF', 'data-a="pdf"') + mi('fileExport', 'Whole notebook as PDF', 'data-a="pdfbook"');
+  if (m === 'page') return seg('Sheet', [['inf', 'Infinite'], ['a4', 'A4'], ['a4x2', 'Two A4']].map(x => mb(x[1], 'data-pm="' + x[0] + '"', x[0] === 'a4x2' ? !!spreadOf(p) : !spreadOf(p) && (p.mode || 'inf') === x[0])).join('')) +
+    seg('Pattern', [['none', 'Blank'], ['dots', 'Dots'], ['lines', 'Lines'], ['squares', 'Grid']].map(x => mb(x[1], 'data-pp="' + x[0] + '"', (p.pat || 'dots') === x[0])).join('')) +
+    '<b>Background</b><div class="seg sws">' + BG.map(c => `<button class="sw ${(p.bg || 'auto') === c ? 'on' : ''}" data-pb="${c}" aria-label="Page background ${c === 'auto' ? 'theme default' : c}" aria-pressed="${(p.bg || 'auto') === c}" style="background:${c === 'auto' ? 'var(--bg)' : c}"></button>`).join('') + customColor('bg', p.bg, 'Custom page background') + '</div>' +
+    seg('Circuit tools', [['0', 'Off'], ['1', 'On']].map(x => mb(x[1], 'data-pc="' + x[0] + '"', (p.circ ? '1' : '0') === x[0])).join(''));
+  if (m === 'lib') return mi('download', 'Download backup', 'data-a="bak"') + mi('upload', 'Import backup', 'data-a="imp"') + '<hr>' + appearanceHTML();
+  const books = (nbOf(p.id).books || []).length;
+  return mi('command', 'Commands <kbd>Ctrl K</kbd>', 'data-a="palette"') + mi('history', 'Page history', 'data-a="hist"') + mi('microphone', 'Voice notes', 'data-a="rec"') + (books ? mi('book', 'Linked books', 'data-a="books"') : '') + (FSOK ? mi('arrowsMaximize', 'Full screen', 'data-a="fs"') : '') +
+    '<hr>' + seg('Snapping', mb('Off', 'data-sn="0"', !ST.snap) + mb('On', 'data-sn="1"', ST.snap)) + seg('Performance', [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('')) + '<hr>' + appearanceHTML();
+}
+let popMode = '';
+// Menus open under the button that opened them; `toggle` closes the menu when its button is pressed again.
+export function pgpop(mode, toggle) {
+  const h = $('#pgpop'), same = !h.hidden && popMode === mode;
   closePops();
-  if (was) return;
-  h.innerHTML = '<b>Page</b><div>' + mb('Commands (Ctrl+K)', 'data-a="palette"') + mb('Page history', 'data-a="hist"') + mb('Export PNG', 'data-a="png"') + mb('Export PDF', 'data-a="pdf"') + mb('Notebook PDF', 'data-a="pdfbook"') + '</div><b>App</b><div>' + mb('Snapping', 'data-a="sn"', ST.snap) + mb('Light / dark', 'data-a="th"') + (FSOK ? mb('Full screen', 'data-a="fs"') : '') + mb('Linked books', 'data-a="books"') + mb('Voice notes', 'data-a="rec"') +
-    '</div><b>Circuit tools</b><div>' + [['0', 'Off'], ['1', 'On']].map(x => mb(x[1], 'data-pc="' + x[0] + '"', (p.circ ? '1' : '0') === x[0])).join('') +
-    '</div><b>Sheet</b><div>' + [['inf', 'Infinite'], ['a4', 'A4 vertical'], ['a4x2', 'Two A4 pages']].map(x => mb(x[1], 'data-pm="' + x[0] + '"', x[0] === 'a4x2' ? !!spreadOf(p) : !spreadOf(p) && (p.mode || 'inf') === x[0])).join('') +
-    '</div><b>Background</b><div>' + BG.map(c => `<button class="sw ${(p.bg || 'auto') === c ? 'on' : ''}" data-pb="${c}" aria-label="Page background ${c}" style="background:${c === 'auto' ? 'var(--bg)' : c}"></button>`).join('') + customColor('bg', p.bg, 'Custom page background') +
-    '</div><b>Pattern</b><div>' + [['none', 'Blank'], ['dots', 'Dots'], ['lines', 'Lines'], ['squares', 'Squares']].map(x => mb(x[1], 'data-pp="' + x[0] + '"', (p.pat || 'dots') === x[0])).join('') +
-    '</div><b>Performance</b><div>' + [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('') + '</div>';
+  if (same && toggle) return;
+  popMode = mode;
+  h.dataset.m = mode;
+  h.innerHTML = menuHTML(mode);
   h.hidden = false;
+  const a = document.querySelector(mode === 'lib' ? '[data-a="lmore"]' : `[data-a="m-${mode}"]`);
+  const r = a ? a.getBoundingClientRect() : { bottom: 64, right: innerWidth - 8 };
+  h.style.top = r.bottom + 8 + 'px';
+  h.style.right = Math.max(8, innerWidth - r.right - 4) + 'px';
 }
 $('#pgpop').onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.a) return propsClick(e);
+  if (b.dataset.sk || b.dataset.md) {
+    setAppearance(b.dataset.sk ? 'skin' : 'mode', b.dataset.sk || b.dataset.md);
+    return pgpop(popMode);
+  }
+  if (b.dataset.a) {
+    propsClick(e);
+    if (['png', 'pdf', 'pdfbook'].includes(b.dataset.a)) closePops();
+    return;
+  }
+  if (b.dataset.sn) {
+    ST.snap = b.dataset.sn === '1';
+    return pgpop(popMode);
+  }
   const p = P();
   if (b.dataset.pf !== undefined) {
     ST.PERF = b.dataset.pf;
@@ -438,8 +545,7 @@ $('#pgpop').onclick = e => {
   if (b.dataset.pb) p.bg = b.dataset.pb;
   if (b.dataset.pp) p.pat = b.dataset.pp;
   save();
-  pgpop();
-  pgpop();
+  pgpop(popMode);
   draw();
   props();
 };
@@ -455,7 +561,6 @@ function enableSpread(p) {
   }
   p.spread = true;
   fitA4(p);
-  side();
 }
 function del() {
   const ids = ST.msel.length ? ST.msel : ST.sel ? [ST.sel] : [];
@@ -511,6 +616,11 @@ addEventListener('keydown', e => {
       draw();
       props();
     }
+    return;
+  }
+  if ((e.key === 'PageDown' || e.key === 'PageUp') && ST.S.view === 'page') {
+    e.preventDefault();
+    goPage(e.key === 'PageDown' ? 1 : -1);
     return;
   }
   if (e.key === ']' || e.key === '[') {

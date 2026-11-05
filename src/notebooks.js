@@ -6,8 +6,8 @@ import { THC, VER, css, custom, inkFor } from './env.js';
 import { bb, describePage, draw, drawR, fitA4 } from './render.js';
 import { normUrl, openLink } from './objects.js';
 import { bkHTML, hostOf, openReader } from './reader.js';
-import { props, setTool } from './toolbar.js';
-import { endRename, side } from './sidebar.js';
+import { pgpop, props, setTool } from './toolbar.js';
+import { I } from './icons.js';
 
 ST.boot = true;
 const COV = ['#d9534f', '#e8913a', '#d8b02e', '#3fa56f', '#3b82c4', '#7c5cc4', '#c4527a', '#3d4a5c'];
@@ -74,12 +74,14 @@ function restore(id) {
   BIN = BIN.filter(b => b !== it);
   saveBin();
   save();
-  side();
 }
+const ICB = (icon, label, attrs = '', cls = 'ib') => `<button class="${cls}" ${attrs} title="${label}" aria-label="${label}">${I[icon]}</button>`;
+const backBtn = label => `<button class="back" data-a="shelf">${I.chevronLeft}<span>${label}</span></button>`;
 function binView() {
   const h = $('#home');
   ST.INK = css('--ink');
-  h.innerHTML = '<div class="hd"><button class="b" data-a="shelf">← Notebooks</button><h2>Bin</h2><span style="color:var(--mut);font-size:12px">Local only · kept 30 days</span>' + (BIN.length ? '<button class="b" data-a="empty">' + (cfm ? 'Click again to empty' : 'Empty bin') + '</button>' : '') + '</div>' + (BIN.length ? '<div class="binlist">' + BIN.map(b => `<div class="binrow"><span class="bi">${b.kind === 'nb' ? '📓' : '📄'}</span><div class="nm"><b>${esc(b.name)}</b><small>${b.kind === 'nb' ? b.nb.pages.length + ' page' + (b.nb.pages.length > 1 ? 's' : '') : 'from ' + esc(b.fromName || '')} · deleted ${new Date(b.ts).toLocaleDateString()}</small></div><button class="b" data-a="rs" data-id="${b.id}">Restore</button><button class="b" data-a="pd" data-id="${b.id}">Delete forever</button></div>`).join('') + '</div>' : '<p style="padding:8px 32px;color:var(--mut)">The bin is empty.</p>');
+  h.innerHTML = '<header class="lhd"><div class="lrow">' + backBtn('Notebooks') + '<span class="grow"></span>' + (BIN.length ? `<button class="pill danger" data-a="empty">${cfm ? 'Tap again to empty' : 'Empty bin'}</button>` : '') + '</div><h1 class="lt">Bin</h1><p class="lsub">Kept on this device for 30 days.</p></header>' +
+    (BIN.length ? '<div class="binlist">' + BIN.map(b => `<div class="binrow"><span class="bi">${b.kind === 'nb' ? I.notebook : I.file}</span><div class="nm"><b>${esc(b.name)}</b><small>${b.kind === 'nb' ? b.nb.pages.length + ' page' + (b.nb.pages.length > 1 ? 's' : '') : 'from ' + esc(b.fromName || '')} · deleted ${new Date(b.ts).toLocaleDateString()}</small></div><button class="pill" data-a="rs" data-id="${b.id}">Restore</button>${ICB('trash', 'Delete forever', `data-a="pd" data-id="${b.id}"`, 'ib danger')}</div>`).join('') + '</div>' : '<p class="empty">The bin is empty.</p>');
 }
 export function load() {
   ST.msel = [];
@@ -88,13 +90,11 @@ export function load() {
   ST.hist = [JSON.stringify(P().els)];
   ST.hi = 0;
   ST.sel = null;
-  $('#pgname').textContent = P().name;
   describePage();
   if (!ST.boot) {
     ST.S.view = 'page';
     ST.S.book = nbOf(ST.S.cur).id;
   }
-  side();
   render();
   draw();
   setTool(ST.tool);
@@ -106,17 +106,15 @@ export function switchPage(id) {
   ST.sel = null;
   ST.hist = [JSON.stringify(P().els)];
   ST.hi = 0;
-  $('#pgname').textContent = P().name;
   describePage();
   save();
-  side();
   props();
   draw();
 }
 export function render() {
   ST.S.view = ST.S.view || 'shelf';
   $('#home').hidden = ST.S.view === 'page';
-  if (ST.S.view !== 'page') home();
+  if (ST.S.view !== 'page') home();else props();
   save();
 }
 function thumb(p, c) {
@@ -161,12 +159,38 @@ function thumb(p, c) {
     });
   }
 }
+// Search results across every notebook: page names, notebook names, text and formulas.
+function results(q) {
+  const R = [];
+  ST.S.nbs.forEach(n => n.pages.forEach(p => {
+    let sn = null;
+    const nm = (n.name + ' ' + p.name).toLowerCase().includes(q);
+    for (const e of p.els) {
+      const t = e.t === 'text' ? e.text : e.t === 'math' ? e.tex : '';
+      if (t && t.toLowerCase().includes(q)) {
+        sn = t;
+        break;
+      }
+    }
+    if (nm || sn) R.push(`<button class="res" data-a="op" data-id="${p.id}">${I.file}<span class="nm"><b>${esc(p.name)}</b><small>${esc(n.name)}${sn ? ' · ' + esc(sn.slice(0, 80)) : ''}</small></span>${I.chevronRight}</button>`);
+  }));
+  return R.length ? '<div class="reslist">' + R.join('') + '</div>' : '<p class="empty">No pages match “' + esc(q) + '”.</p>';
+}
+function shelfBody() {
+  const q = (ST.q || '').trim().toLowerCase();
+  if (q) return results(q);
+  return '<div class="shelf">' + ST.S.nbs.map((n, i) => `<div class="book" role="button" tabindex="0" data-a="ob" data-id="${n.id}" aria-label="${esc(n.name)}, ${n.pages.length} page${n.pages.length > 1 ? 's' : ''}"><div class="cover" style="--c:${cc(n, i)}"><div class="ttl">${esc(n.name)}</div></div><div class="bmeta"><b>${esc(n.name)}</b><small>${n.pages.length} page${n.pages.length > 1 ? 's' : ''}</small></div></div>`).join('') +
+    `<div class="book" role="button" tabindex="0" aria-label="New notebook" data-a="nb"><div class="cover new">${I.plus}</div><div class="bmeta"><b>New notebook</b></div></div></div>`;
+}
 export function home() {
   const h = $('#home');
   ST.INK = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
   if (ST.S.view === 'bin') return binView();
   if (ST.S.view === 'shelf') {
-    h.innerHTML = '<div class="hd"><h2>Your notebooks</h2><span class="cloudst" style="color:var(--mut)">' + ST.cstat + '</span><span class="acct">' + ST.acctHTML + '</span><button class="b" data-a="bin">🗑 Bin (' + BIN.length + ')</button></div><div class="shelf">' + ST.S.nbs.map((n, i) => `<div class="book" role="button" tabindex="0" data-a="ob" data-id="${n.id}"><div class="cover" style="--c:${cc(n, i)}"><div class="ttl">${esc(n.name)}</div><small>${n.pages.length} page${n.pages.length > 1 ? 's' : ''}</small></div></div>`).join('') + '<div class="book" role="button" tabindex="0" aria-label="New notebook" data-a="nb"><div class="cover new">+<small>New notebook</small></div></div></div>';
+    h.innerHTML = '<header class="lhd"><div class="lrow"><h1 class="lt">Notebooks</h1><span class="grow"></span><span class="cloudst chip">' + esc(ST.cstat) + '</span>' +
+      `<button class="ib" data-a="bin" title="Bin" aria-label="Bin, ${BIN.length} item${BIN.length === 1 ? '' : 's'}">${I.trash}${BIN.length ? `<span class="badge" aria-hidden="true">${BIN.length}</span>` : ''}</button>` +
+      ICB('dotsVertical', 'Library menu: backup, import, theme', 'data-a="lmore" aria-haspopup="true"') + '</div>' +
+      `<div class="lrow wrap"><label class="srch">${I.search}<input id="srch" type="search" placeholder="Search pages and text" aria-label="Search pages and text" value="${esc(ST.q || '')}" autocomplete="off"></label><span class="acct">${ST.acctHTML}</span></div></header><div id="lbody">${shelfBody()}</div>`;
     return;
   }
   const n = ST.S.nbs.find(x => x.id === ST.S.book);
@@ -174,13 +198,39 @@ export function home() {
     ST.S.view = 'shelf';
     return home();
   }
-  h.innerHTML = `<div class="hd"><button class="b" data-a="shelf">← Notebooks</button><input data-bn value="${esc(n.name)}" aria-label="Notebook name"><span>${COV.map(c => `<button class="sw ${cc(n, ST.S.nbs.indexOf(n)) === c ? 'on' : ''}" data-a="c" data-id="${c}" aria-label="Cover color ${c}" style="background:${c}"></button>`).join('')}</span><button class="b" data-a="bkadd">📚 Add book (PDF)</button><button class="b" data-a="bklink">🔗 Add book (link)</button>${ST.S.nbs.length > 1 ? `<button class="b" data-a="dn">${cfm ? 'Click again to delete' : 'Delete notebook'}</button>` : ''}</div>${bkHTML(n)}<div class="grid">` + n.pages.map(p => `<div class="card" role="button" tabindex="0" data-a="op" data-id="${p.id}"><canvas width="320" height="210" data-th="${p.id}"></canvas><div class="cn">${ST.ren === p.id ? `<input data-r="${p.id}" value="${esc(p.name)}">` : `<span class="nm" data-rn="${p.id}" title="Double-click to rename">${esc(p.name)}</span>`}<button class="x" data-a="dpg" data-id="${p.id}" title="Duplicate page" aria-label="Duplicate page">⧉</button>${n.pages.length > 1 ? `<button class="x" data-a="dp" data-id="${p.id}" title="Delete page" aria-label="Delete page">×</button>` : ''}</div></div>`).join('') + '<div class="card new" role="button" tabindex="0" data-a="np">+ New page</div></div>';
+  const idx = ST.S.nbs.indexOf(n);
+  h.innerHTML = '<header class="lhd"><div class="lrow">' + backBtn('Notebooks') + '<span class="grow"></span>' +
+    ICB('books', 'Add book (PDF)', 'data-a="bkadd"') + ICB('link', 'Add book (link)', 'data-a="bklink"', 'ib' + (ST.bkForm ? ' on' : '')) +
+    (ST.S.nbs.length > 1 ? (cfm ? '<button class="pill danger" data-a="dn">Tap again to delete</button>' : ICB('trash', 'Delete notebook', 'data-a="dn"', 'ib danger')) : '') + '</div>' +
+    `<input class="lt" data-bn value="${esc(n.name)}" aria-label="Notebook name"><div class="covers" role="group" aria-label="Cover color">${COV.map(c => `<button class="sw${cc(n, idx) === c ? ' on' : ''}" data-a="c" data-id="${c}" aria-label="Cover color ${c}" aria-pressed="${cc(n, idx) === c}" style="background:${c}"></button>`).join('')}</div></header>` +
+    bkHTML(n) + '<div class="grid">' + n.pages.map(p => `<div class="card" role="button" tabindex="0" data-a="op" data-id="${p.id}" aria-label="Open ${esc(p.name)}"><canvas width="320" height="210" data-th="${p.id}"></canvas><div class="cn">${ST.ren === p.id ? `<input data-r="${p.id}" value="${esc(p.name)}" aria-label="Page name">` : `<span class="nm" data-rn="${p.id}">${esc(p.name)}</span>`}` +
+    ICB('pencil', 'Rename page', `data-a="ren" data-id="${p.id}"`, 'ib sm') + ICB('copy', 'Duplicate page', `data-a="dpg" data-id="${p.id}"`, 'ib sm') + (n.pages.length > 1 ? ICB('trash', 'Delete page', `data-a="dp" data-id="${p.id}"`, 'ib sm') : '') + '</div></div>').join('') +
+    `<div class="card new" role="button" tabindex="0" data-a="np">${I.filePlus}<span>New page</span></div></div>`;
   n.pages.forEach(p => thumb(p, h.querySelector(`[data-th="${p.id}"]`)));
   const i = h.querySelector('input[data-r]');
   if (i) {
     i.focus();
     i.select();
   }
+}
+export function endRename(i) {
+  const id = i.dataset.r,
+    v = i.value.trim();
+  ST.ren = null;
+  for (const n of ST.S.nbs) {
+    if (n.id === id && v) n.name = v;
+    for (const p of n.pages) if (p.id === id && v) p.name = v;
+  }
+  save();
+  ST.S.view === 'page' ? props() : home();
+}
+export function newNotebook() {
+  const p = { id: uid(), name: 'Page 1', els: [], v: { x: 0, y: 0, z: 1 } },
+    nn = { id: uid(), name: 'Notebook ' + (ST.S.nbs.length + 1), open: true, pages: [p], color: COV[ST.S.nbs.length % COV.length] };
+  ST.S.nbs.push(nn);
+  ST.S.book = nn.id;
+  ST.S.view = 'book';
+  render();
 }
 $('#home').onclick = e => {
   const t = e.target;
@@ -191,6 +241,11 @@ $('#home').onclick = e => {
     id = el.dataset.id,
     n = ST.S.nbs.find(x => x.id === ST.S.book);
   if (a !== 'dn' && a !== 'empty') cfm = false;
+  if (a === 'lmore') return pgpop('lib', el);
+  if (a === 'ren') {
+    ST.ren = id;
+    return home();
+  }
   if (a === 'ob') {
     ST.S.view = 'book';
     ST.S.book = id;
@@ -232,28 +287,8 @@ $('#home').onclick = e => {
       BIN = [];
       saveBin();
     }
-  } else if (a === 'nb') {
-    const p = {
-        id: uid(),
-        name: 'Page 1',
-        els: [],
-        v: {
-          x: 0,
-          y: 0,
-          z: 1
-        }
-      },
-      nn = {
-        id: uid(),
-        name: 'Notebook ' + (ST.S.nbs.length + 1),
-        open: true,
-        pages: [p],
-        color: COV[ST.S.nbs.length % COV.length]
-      };
-    ST.S.nbs.push(nn);
-    ST.S.book = nn.id;
-    ST.S.view = 'book';
-  } else if (a === 'c') n.color = id;else if (a === 'dn') {
+  } else if (a === 'nb') return newNotebook();
+  else if (a === 'c') n.color = id;else if (a === 'dn') {
     if (!cfm) {
       cfm = true;
     } else {
@@ -262,7 +297,6 @@ $('#home').onclick = e => {
       ST.S.nbs = ST.S.nbs.filter(x => x !== n);
       ST.S.view = 'shelf';
       if (!P()) ST.S.cur = ST.S.nbs[0].pages[0].id;
-      side();
     }
   } else if (a === 'np') {
     const p = {
@@ -293,10 +327,14 @@ $('#home').onclick = e => {
     binPg(n, id);
     n.pages = n.pages.filter(p => p.id !== id);
     if (!P()) ST.S.cur = n.pages[0].id;
-    side();
   }
   render();
 };
+$('#home').addEventListener('input', e => {
+  if (e.target.id !== 'srch') return;
+  ST.q = e.target.value;
+  $('#lbody').innerHTML = shelfBody();
+});
 $('#home').ondblclick = e => {
   const id = e.target.dataset.rn;
   if (id) {
@@ -316,11 +354,5 @@ $('#home').addEventListener('change', e => {
       v = e.target.value.trim();
     if (v) n.name = v;
     save();
-    side();
   }
 });
-$('#back').onclick = () => {
-  ST.S.view = 'book';
-  ST.S.book = nbOf(ST.S.cur).id;
-  render();
-};

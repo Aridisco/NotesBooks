@@ -14,7 +14,6 @@ import './voice.js';
 import './reader.js';
 import './math.js';
 import './toolbar.js';
-import './sidebar.js';
 import './a11y.js';
 import './versions.js';
 import './palette.js';

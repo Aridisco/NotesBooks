@@ -43,6 +43,18 @@ import history from '@tabler/icons/outline/history.svg?raw';
 import command from '@tabler/icons/outline/command.svg?raw';
 import arrowLeft from '@tabler/icons/outline/arrow-left.svg?raw';
 import playerRecord from '@tabler/icons/outline/player-record.svg?raw';
+import chevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
+import chevronRight from '@tabler/icons/outline/chevron-right.svg?raw';
+import share from '@tabler/icons/outline/share.svg?raw';
+import fileSettings from '@tabler/icons/outline/file-settings.svg?raw';
+import dotsVertical from '@tabler/icons/outline/dots-vertical.svg?raw';
+import filePlus from '@tabler/icons/outline/file-plus.svg?raw';
+import books from '@tabler/icons/outline/books.svg?raw';
+import upload from '@tabler/icons/outline/upload.svg?raw';
+import fileExport from '@tabler/icons/outline/file-export.svg?raw';
+import notebook from '@tabler/icons/outline/notebook.svg?raw';
+import file from '@tabler/icons/outline/file.svg?raw';
+import download from '@tabler/icons/outline/download.svg?raw';
 
 const strip = s => s.replace(/<svg[^>]*>/, '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">').replace(/<path stroke="none"[^>]*\/>/, '');
 export const I = {
@@ -90,4 +102,16 @@ export const I = {
   command: strip(command),
   arrowLeft: strip(arrowLeft),
   playerRecord: strip(playerRecord),
+  chevronLeft: strip(chevronLeft),
+  chevronRight: strip(chevronRight),
+  share: strip(share),
+  fileSettings: strip(fileSettings),
+  dotsVertical: strip(dotsVertical),
+  filePlus: strip(filePlus),
+  books: strip(books),
+  upload: strip(upload),
+  fileExport: strip(fileExport),
+  notebook: strip(notebook),
+  file: strip(file),
+  download: strip(download),
 };

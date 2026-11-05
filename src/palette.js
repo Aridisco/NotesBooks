@@ -4,7 +4,7 @@ import { $, uid } from './util.js';
 import { askChoice } from './dialog.js';
 import { commit, undo } from './render.js';
 import { exportPDF, exportPNG, fitAll } from './edit.js';
-import { load, nbOf } from './notebooks.js';
+import { load, nbOf, newNotebook, render } from './notebooks.js';
 import { props, setTool, toggleTheme } from './toolbar.js';
 import { snapshot, listVersions, getVersion } from './versions.js';
 import { toast } from './report.js';
@@ -55,9 +55,10 @@ function commands() {
     { label: 'Fit page to screen', run: () => { fitAll(); props(); } },
     { label: 'Toggle properties panel', run: () => { ST.panel = !ST.panel; props(); } },
     { label: 'Toggle light / dark', run: () => { toggleTheme(); props(); } },
-    { label: 'Toggle sidebar', run: () => $('#toggle').click() },
+    { label: 'Go to notebook pages', run: () => { ST.S.view = 'book'; ST.S.book = nbOf(ST.S.cur).id; render(); } },
+    { label: 'Go to all notebooks', run: () => { ST.S.view = 'shelf'; render(); } },
     { label: 'New page', run: newPage },
-    { label: 'New notebook', run: () => $('#newnb').click() },
+    { label: 'New notebook', run: newNotebook },
     { label: 'Export page as PNG', run: exportPNG },
     { label: 'Export page as PDF', run: exportPagePDF },
     { label: 'Export notebook as PDF', run: exportBookPDF },
