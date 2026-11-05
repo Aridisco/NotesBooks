@@ -1,4 +1,5 @@
 import { ST } from './state.js';
+import { invalidateAll } from './scene.js';
 import { $, uid } from './util.js';
 import { save, setStat } from './cloud.js';
 import { loadScript } from './env.js';
@@ -42,6 +43,7 @@ export function bkBmp(p) {
   bkDoc(p.bk.id).then(async doc => {
     if (!doc) {
       ent.miss = true;
+      invalidateAll();
       draw();
       return;
     }
@@ -61,6 +63,7 @@ export function bkBmp(p) {
     }).promise;
     ent.cv = c2;
     ent.ok = true;
+    invalidateAll();
     draw();
   }).catch(() => {
     ent.miss = true;
@@ -88,6 +91,7 @@ async function importBook(file, n) {
     }, ex.bk.id));
     BKD.delete(ex.bk.id);
     BKC.clear();
+    invalidateAll();
     draw();
     setStat('Book file attached again');
     return;

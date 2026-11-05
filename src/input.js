@@ -2,7 +2,7 @@ import { P, ST } from './state.js';
 import { $, cv, esc, uid } from './util.js';
 import { save } from './cloud.js';
 import { FF, G, col, needX, rot } from './env.js';
-import { A4H, A4W, GAP, OX, bb, cl, commit, cpts, draw, hdl, polyPts, spreadOf, tfit } from './render.js';
+import { A4H, A4W, GAP, OX, bb, cl, commit, cpts, draw, drawView, hdl, polyPts, spreadOf, tfit } from './render.js';
 import { cur, selIds, union } from './edit.js';
 import { compPlace, openLabel, wpts } from './circuit.js';
 import { TCOL, THL, badgePos, cellAt, linkOf, openCell, openLink, tablePlace, tgeo } from './objects.js';
@@ -491,7 +491,7 @@ cv.addEventListener('pointermove', ev => {
     p.v.z = z;
     p.v.x = cx - (pinch.cx - o.x) * z / o.z;
     p.v.y = cy - (pinch.cy - o.y) * z / o.z;
-    draw();
+    drawView();
     return;
   }
   if (!ST.act) return;
@@ -499,6 +499,7 @@ cv.addEventListener('pointermove', ev => {
   if (ST.act.k === 'pan') {
     p.v.x = ST.act.v.x + px - ST.act.px;
     p.v.y = ST.act.v.y + py - ST.act.py;
+    return drawView();
   } else if (ST.act.k === 'move') {
     const q = snpMove(ST.act.e, ST.act.b0, x - ST.act.x, y - ST.act.y);
     ST.act.e.x = ST.act.ox + q[0];

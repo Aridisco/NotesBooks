@@ -1,4 +1,5 @@
 import { P, ST } from './state.js';
+import { invalidateEl } from './scene.js';
 import { $, cv, uid } from './util.js';
 import { save } from './cloud.js';
 import { css, custom, inkFor, needX } from './env.js';
@@ -119,7 +120,10 @@ export function imgSrc(e) {
   let i = IMC.get(k);
   if (!i) {
     i = new Image();
-    i.onload = () => draw();
+    i.onload = () => {
+      invalidateEl(e);
+      draw();
+    };
     i.src = e.src;
     IMC.set(k, i);
   }

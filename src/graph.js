@@ -1,5 +1,6 @@
 // Function graphs: a live page object that keeps its formula, so editing f(x) redraws the curve.
 import { ST } from './state.js';
+import { invalidateAll } from './scene.js';
 import { col, css, loadNerd } from './env.js';
 import { draw } from './render.js';
 
@@ -20,7 +21,10 @@ const GC = ['#1971c2', '#e03131', '#2f9e44', '#f08c00', '#7048e8'];
 // Compiled functions for "f1; f2; …", or null while the solver library is still loading.
 export function graphFns(fx) {
   if (!window.nerdamer) {
-    loadNerd().then(draw).catch(() => {});
+    loadNerd().then(() => {
+      invalidateAll();
+      draw();
+    }).catch(() => {});
     return null;
   }
   let f = FN.get(fx);

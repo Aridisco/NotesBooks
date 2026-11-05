@@ -20,7 +20,7 @@ import './palette.js';
 import { P, ST } from './state.js';
 import { cloudInit } from './cloud.js';
 import { CC, FF, resize } from './env.js';
-import { draw, tfit } from './render.js';
+import { draw, renderNow, tfit } from './render.js';
 import { load } from './notebooks.js';
 import { props, setTool } from './toolbar.js';
 
@@ -38,3 +38,5 @@ document.fonts && Promise.all([FF.hand, FF.sans].map(f => document.fonts.load('5
   P().els.forEach(e => e.t === 'text' && tfit(e));
   draw();
 });
+// dev-only handle for benchmarks and debugging from the console
+if (import.meta.env.DEV) import('./scene.js').then(m => window.__sk = { ST, P, draw, renderNow, load, setRenderer: m.setRenderer });

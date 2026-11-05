@@ -3,7 +3,7 @@ import { P, ST } from './state.js';
 import { $, cv, uid } from './util.js';
 import { save } from './cloud.js';
 import { loadMJ, loadNerd } from './env.js';
-import { cl, commit, draw } from './render.js';
+import { cl, commit, drawView } from './render.js';
 import { props } from './toolbar.js';
 import { report } from './report.js';
 import { I } from './icons.js';
@@ -297,7 +297,7 @@ cv.addEventListener('wheel', ev => {
     v.y -= ev.deltaY;
   }
   save();
-  draw();
+  drawView();
 }, {
   passive: false
 });

@@ -6,6 +6,7 @@ import { imgSrc } from './edit.js';
 import { compDraw, wpts } from './circuit.js';
 import { badgePos, drawTable, linkOf, tcellRect } from './objects.js';
 import { drawGraph } from './graph.js';
+import { invalidateEl, sceneFrame, useScene } from './scene.js';
 import { BKC, bkBmp } from './books.js';
 import { placeCtx } from './toolbar.js';
 import { drawCode } from './code.js';
@@ -101,7 +102,10 @@ function imgFor(e) {
   let i = IM.get(k);
   if (!i) {
     i = new Image();
-    i.onload = () => draw();
+    i.onload = () => {
+      invalidateEl(e);
+      draw();
+    };
     i.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(e.svg.replace(/currentColor/g, c));
     IM.set(k, i);
   }
@@ -413,7 +417,91 @@ function clampV(p) {
   v.x = Math.max(m - spreadW(p) * v.z, Math.min(W - m, v.x));
   v.y = Math.max(m - A4H * v.z, Math.min(H - m, v.y));
 }
+export const bgOf = p => p.mode === 'a4' ? css('--line') : custom(p) ? p.bg : css('--bg');
+// Draws one sheet (paper, pattern, book page, objects) into ST.ctx, where device = k * world + (ox, oy) and the
+// target is W x H device pixels. Used for the screen (classic renderer) and for every cached tile (GPU renderer).
+export function paintSheet(pg, offX, a4, k, ox, oy, W, H, d, skip) {
+  const c = ST.ctx, x0 = ox + k * offX;
+  c.save();
+  if (a4) {
+    c.setTransform(k, 0, 0, k, x0, oy);
+    c.save();
+    if (!ST.LT) {
+      c.shadowColor = 'rgba(0,0,0,.28)';
+      c.shadowBlur = 20 * d;
+    }
+    c.fillStyle = custom(pg) ? pg.bg : css('--panel');
+    c.fillRect(0, 0, A4W, A4H);
+    c.restore();
+    c.beginPath();
+    c.rect(0, 0, A4W, A4H);
+    c.clip();
+  }
+  // grid pattern in device pixels so dots and lines stay crisp at any zoom
+  const g = 28 * k, pat = pg.pat || 'dots';
+  if (pat !== 'none' && g > 8 * d) {
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.save();
+    c.globalAlpha = .2;
+    c.fillStyle = c.strokeStyle = ST.INK;
+    c.lineWidth = d;
+    const gx = (x0 % g + g) % g, gy = (oy % g + g) % g;
+    c.beginPath();
+    if (pat === 'dots') {
+      for (let x = gx; x < W + d; x += g) for (let y = gy; y < H + d; y += g) c.rect(x - d, y - d, 2 * d, 2 * d);
+      c.fill();
+    } else {
+      for (let y = gy; y < H; y += g) {
+        c.moveTo(0, y);
+        c.lineTo(W, y);
+      }
+      if (pat === 'squares') for (let x = gx; x < W; x += g) {
+        c.moveTo(x, 0);
+        c.lineTo(x, H);
+      }
+      c.stroke();
+    }
+    c.restore();
+  }
+  c.setTransform(k, 0, 0, k, x0, oy);
+  if (pg.bk) {
+    const bm = bkBmp(pg);
+    if (bm) c.drawImage(bm, 0, 0, A4W, A4W * bm.height / bm.width);else {
+      const c0 = BKC.get(pg.bk.id + ':' + pg.bk.i);
+      if (c0 && c0.miss) {
+        c.save();
+        c.fillStyle = ST.INK;
+        c.globalAlpha = .5;
+        c.font = '500 22px Figtree,sans-serif';
+        c.textAlign = 'center';
+        c.fillText('Book file is not on this device. Import the same PDF again.', A4W / 2, A4H / 2);
+        c.restore();
+      }
+    }
+  }
+  const m = 40 * d / k + 40, vx0 = -x0 / k - m, vy0 = -oy / k - m, vx1 = (W - x0) / k + m, vy1 = (H - oy) / k + m;
+  const vis = e => {
+    if (skip && skip.has(e)) return;
+    if (e.t !== 'text' || e.w) {
+      const b = bb(e), r = e.r ? Math.hypot(b.w, b.h) / 2 : 0, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      const X0 = e.r ? cx - r : b.x, Y0 = e.r ? cy - r : b.y, X1 = e.r ? cx + r : b.x + b.w, Y1 = e.r ? cy + r : b.y + b.h;
+      if (X0 > vx1 || Y0 > vy1 || X1 < vx0 || Y1 < vy0) return;
+    }
+    drawR(e);
+  };
+  // highlighter strokes go under everything else, like ink over a marker
+  pg.els.forEach(e => e.hl && vis(e));
+  pg.els.forEach(e => !e.hl && vis(e));
+  c.restore();
+}
+// A redraw where only the view moved (pan, pinch, wheel, zoom buttons): the renderer can skip looking for edits.
+export function drawView() {
+  const pending = ST.rq;
+  draw();
+  if (!pending) ST.viewOnly = true;
+}
 export function draw() {
+  ST.viewOnly = false;
   if (ST.rq) return;
   if (ST.LT) ST.rq = setTimeout(() => {
     ST.rq = 0;
@@ -423,6 +511,15 @@ export function draw() {
     drawNow();
   });
 }
+// Synchronous redraw, used by benchmarks and anything that needs pixels right now.
+export function renderNow() {
+  if (ST.rq) {
+    cancelAnimationFrame(ST.rq);
+    clearTimeout(ST.rq);
+    ST.rq = 0;
+  }
+  drawNow();
+}
 function drawNow() {
   ST.LT = LITE();
   const d = dpr(),
@@ -431,91 +528,28 @@ function drawNow() {
   ST.INK = inkFor(p);
   if (p.mode === 'a4') clampV(p);
   const a4 = p.mode === 'a4';
-  ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ST.ctx.fillStyle = a4 ? css('--line') : custom(p) ? p.bg : css('--bg');
-  ST.ctx.fillRect(0, 0, cv.width, cv.height);
   const sp = a4 ? spreadOf(p) : null,
-    sheets = sp ? [[sp.L, 0], [sp.R, A4W + GAP]] : [[p, 0]];
-  const paper = (pg, offX) => {
-    const vx = v.x + offX * v.z;
-    if (a4) {
-      ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * vx, d * v.y);
-      ST.ctx.save();
-      if (!ST.LT) {
-        ST.ctx.shadowColor = 'rgba(0,0,0,.28)';
-        ST.ctx.shadowBlur = 20 * d;
-      }
-      ST.ctx.fillStyle = custom(pg) ? pg.bg : css('--panel');
-      ST.ctx.fillRect(0, 0, A4W, A4H);
-      ST.ctx.restore();
-      ST.ctx.save();
-      ST.ctx.beginPath();
-      ST.ctx.rect(0, 0, A4W, A4H);
-      ST.ctx.clip();
-      ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    }
-    const g = 28 * v.z,
-      pat = pg.pat || 'dots',
-      W = cv.width / d,
-      H = cv.height / d;
-    if (pat !== 'none' && g > 8) {
-      ST.ctx.save();
-      ST.ctx.globalAlpha = .2;
-      ST.ctx.fillStyle = ST.ctx.strokeStyle = ST.INK;
-      ST.ctx.lineWidth = d;
-      const ox = (vx % g + g) % g,
-        oy = (v.y % g + g) % g;
-      if (pat === 'dots') {
-        ST.ctx.beginPath();
-        for (let x = ox; x < W; x += g) for (let y = oy; y < H; y += g) ST.ctx.rect((x - 1) * d, (y - 1) * d, 2 * d, 2 * d);
-        ST.ctx.fill();
-      } else {
-        ST.ctx.beginPath();
-        for (let y = oy; y < H; y += g) {
-          ST.ctx.moveTo(0, y * d);
-          ST.ctx.lineTo(W * d, y * d);
-        }
-        if (pat === 'squares') for (let x = ox; x < W; x += g) {
-          ST.ctx.moveTo(x * d, 0);
-          ST.ctx.lineTo(x * d, H * d);
-        }
-        ST.ctx.stroke();
-      }
-      ST.ctx.restore();
-    }
-    ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * vx, d * v.y);
-    if (pg.bk) {
-      const bm = bkBmp(pg);
-      if (bm) ST.ctx.drawImage(bm, 0, 0, A4W, A4W * bm.height / bm.width);else {
-        const c0 = BKC.get(pg.bk.id + ':' + pg.bk.i);
-        if (c0 && c0.miss) {
-          ST.ctx.save();
-          ST.ctx.fillStyle = ST.INK;
-          ST.ctx.globalAlpha = .5;
-          ST.ctx.font = '500 22px Figtree,sans-serif';
-          ST.ctx.textAlign = 'center';
-          ST.ctx.fillText('Book file is not on this device. Import the same PDF again.', A4W / 2, A4H / 2);
-          ST.ctx.restore();
-        }
-      }
-    }
-    const vx0 = -vx / v.z - 40,
-      vy0 = -v.y / v.z - 40,
-      vx1 = vx0 + cv.clientWidth / v.z + 80,
-      vy1 = vy0 + cv.clientHeight / v.z + 80;
-    const vis = e => {
-      if (!e.r && e.t !== 'text') {
-        const b = bb(e);
-        if (b.x > vx1 || b.y > vy1 || b.x + b.w < vx0 || b.y + b.h < vy0) return;
-      }
-      drawR(e);
-    };
-    // highlighter strokes go under everything else, like ink over a marker
-    pg.els.forEach(e => e.hl && vis(e));
-    pg.els.forEach(e => !e.hl && vis(e));
-    if (a4) ST.ctx.restore();
-  };
-  sheets.forEach(([pg, o]) => paper(pg, o));
+    sheets = sp ? [[sp.L, 0], [sp.R, A4W + GAP]] : [[p, 0]],
+    k = d * v.z, ax = sp && sp.R === p ? A4W + GAP : 0;
+  // GPU path: cached tiles are composited underneath, this canvas only carries live edits and selection
+  const sc = useScene() ? sceneFrame({ p, v, d, a4, sheets }) : null, live = sc && sc.live;
+  if (sc) {
+    ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (sc.gl) ST.ctx.clearRect(0, 0, cv.width, cv.height);
+  } else {
+    ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ST.ctx.fillStyle = bgOf(p);
+    ST.ctx.fillRect(0, 0, cv.width, cv.height);
+    sheets.forEach(([pg, o]) => paintSheet(pg, o, a4, k, d * v.x, d * v.y, cv.width, cv.height, d));
+  }
+  if (live && live.length) {
+    // objects being drawn, moved or resized are left out of the tiles and painted here every frame
+    ST.ctx.save();
+    ST.ctx.setTransform(k, 0, 0, k, d * v.x + k * ax, d * v.y);
+    live.filter(e => e.hl).forEach(drawR);
+    live.filter(e => !e.hl).forEach(drawR);
+    ST.ctx.restore();
+  }
   // selection, links and handles belong to the active page, so draw them in its coordinate space
   ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * (v.x + (sp && sp.R === p ? A4W + GAP : 0) * v.z), d * v.y);
   const aco = css('--acc');

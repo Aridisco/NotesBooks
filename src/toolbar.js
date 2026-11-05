@@ -4,6 +4,7 @@ import { doSave, save, saveBtn } from './cloud.js';
 import { BG, CC, FF, FSOK, THC, resize } from './env.js';
 import { OX, commit, draw, fitA4, spreadOf, tfit, undo } from './render.js';
 import { endRename, load, nbOf, render } from './notebooks.js';
+import { rendererName, setRenderer } from './scene.js';
 import { ALN, ahHTML, align, cur, dssHTML, dupe, fitAll, selIds, union, zord } from './edit.js';
 import { togglePal } from './circuit.js';
 import { linkEd, tableMenuHTML, tbl } from './objects.js';
@@ -604,7 +605,7 @@ function menuHTML(m) {
   if (m === 'lib') return mi('download', 'Download backup', 'data-a="bak"') + mi('upload', 'Import backup', 'data-a="imp"') + '<hr>' + appearanceHTML();
   const books = (nbOf(p.id).books || []).length;
   return mi('command', 'Commands <kbd>Ctrl K</kbd>', 'data-a="palette"') + mi('history', 'Page history', 'data-a="hist"') + mi('microphone', 'Voice notes', 'data-a="rec"') + (books ? mi('book', 'Linked books', 'data-a="books"') : '') + (FSOK ? mi('arrowsMaximize', 'Full screen', 'data-a="fs"') : '') +
-    '<hr>' + seg('Snapping', mb('Off', 'data-sn="0"', !ST.snap) + mb('On', 'data-sn="1"', ST.snap)) + seg('Performance', [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('')) + '<hr>' + appearanceHTML();
+    '<hr>' + seg('Snapping', mb('Off', 'data-sn="0"', !ST.snap) + mb('On', 'data-sn="1"', ST.snap)) + seg('Performance', [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('')) + seg('Renderer', [['gpu', 'GPU tiles'], ['classic', 'Classic']].map(x => mb(x[1], 'data-rd="' + x[0] + '"', rendererName() === x[0])).join('')) + '<hr>' + appearanceHTML();
 }
 let popMode = '';
 // Menus open under the button that opened them; `toggle` closes the menu when its button is pressed again.
@@ -641,6 +642,11 @@ $('#pgpop').onclick = e => {
     propsClick(e);
     if (['png', 'pdf', 'pdfbook'].includes(b.dataset.a)) closePops();
     return;
+  }
+  if (b.dataset.rd) {
+    setRenderer(b.dataset.rd);
+    draw();
+    return pgpop(popMode);
   }
   if (b.dataset.sn) {
     ST.snap = b.dataset.sn === '1';
