@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sketchbooks</title>
+<link rel="stylesheet" href="/src/styles/main.css">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
+<script>window.MathJax={svg:{fontCache:"none"},startup:{typeset:false}}</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<aside id="side"><h1>Sketchbooks</h1><div id="cloud" class="cloudst" role="status" aria-live="polite"></div><div id="acct" class="acct"></div><input id="srch" placeholder="Search pages and text…"><div id="tree"></div><button id="newnb">+ New notebook</button><button id="binbtn">🗑 Bin</button><div id="io"><button id="exp" title="Export this page as PNG" aria-label="Export this page as PNG">PNG</button><button id="bak" title="Download a backup of everything" aria-label="Download a backup of everything">Backup</button><button id="imp" title="Import a backup" aria-label="Import a backup">Import</button></div><input type="file" id="ifile" accept=".json" hidden><input type="file" id="imgf" accept="image/*" hidden></aside>
+<div id="main">
+<canvas id="cv" role="img" aria-label="Drawing canvas for the current page" aria-describedby="cvdesc"></canvas>
+<button id="toggle" title="Notebooks" aria-label="Notebooks">☰</button>
+<div id="tools" class="bar"></div>
+<div id="props" class="bar"></div>
+<button id="back" title="Back to notebook" aria-label="Back to notebook">←</button>
+<div id="pgpop" class="bar" hidden></div><div id="bkpop" class="bar" hidden></div>
+<div id="cpal" class="bar" hidden></div>
+<div id="mbox" class="bar" hidden><textarea id="mtex" placeholder="LaTeX, e.g. x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}"></textarea><div id="mprev"></div><div id="msn"></div><div id="msv"></div><div id="mres"></div><button class="b" id="madd" hidden>Add result to page</button><div class="row"><button class="b ok" id="mok">Insert</button><button class="b" id="mno">Cancel</button></div></div>
+<div id="cvdesc" class="sr"></div><div id="pgname"></div>
+</div>
+<aside id="reader" hidden><div class="rh"><b id="rt"></b><span class="grow"></span><a id="ro" class="b" target="_blank" rel="noopener">Open ↗</a><button id="rx" class="b" aria-label="Close reader">✕</button></div><small class="rn">If the page stays blank, that site does not allow embedding. Use “Open ↗” instead.</small><iframe id="rf" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups"></iframe></aside>
+<div id="vbox" class="bar" hidden><div class="row"><select id="vlang"></select><button class="b" id="vgo">● Record</button><button class="b" id="vadd">Add to page</button></div><div id="vtxt">Press Record to transcribe live. The audio is saved on this device.</div><div id="vlist"></div></div>
+<input type="file" id="bkf" accept="application/pdf" hidden>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="svbar" hidden>Unsaved changes <button id="svnow">Save now</button><button id="svx">Dismiss</button></div>
+<div id="home" hidden></div>
+<script type="module" src="/src/main.js"></script></body></html>
