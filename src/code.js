@@ -23,6 +23,8 @@ const kindAt = (toks, i) => {
 /* ---------- geometry shared by canvas drawing and the editor ---------- */
 export const PAD = 12;
 const LH = 1.5;
+// A new block opens as a window of this size; the user can resize it, long lines wrap inside it.
+export const CODE_W = 560, CODE_H = 320;
 const mono = fs => `${fs}px ${FF.mono}`;
 export function codeMetrics(e) {
   const fs = e.fs || 18, ctx = ST.ctx;
@@ -30,13 +32,23 @@ export function codeMetrics(e) {
   const lines = (e.text || '').split('\n'),
     cw = ctx.measureText('M').width,
     digits = String(lines.length).length,
-    gut = e.nums === false ? 0 : Math.ceil(cw * Math.max(2, digits) + 14);
-  return { fs, lines, cw, gut, lh: fs * LH };
+    gut = e.nums === false ? 0 : Math.ceil(cw * Math.max(2, digits) + 14),
+    per = Math.max(8, Math.floor((Math.abs(e.w || CODE_W) - gut - PAD * 2) / cw));
+  // wrap by characters (the font is monospaced), so canvas and editor break lines at the same place
+  const rows = [];
+  let off = 0;
+  lines.forEach((l, n) => {
+    for (let a = 0; a === 0 || a < l.length; a += per) rows.push({ n, a: off + a, s: l.slice(a, a + per), first: a === 0 });
+    off += l.length + 1;
+  });
+  return { fs, lines, rows, per, cw, gut, lh: fs * LH };
 }
+// Keeps the chosen size, but grows the window down when the wrapped code needs more room.
 export function codeFit(e) {
+  if (!e.w) e.w = CODE_W;
+  e.w = Math.max(200, Math.abs(e.w));
   const m = codeMetrics(e);
-  e.w = Math.max(160, m.gut + PAD * 2 + Math.max(...m.lines.map(l => ST.ctx.measureText(l).width), 20));
-  e.h = m.lines.length * m.lh + PAD * 2;
+  e.h = Math.max(Math.abs(e.h) || CODE_H, 60, m.rows.length * m.lh + PAD * 2);
 }
 
 /* ---------- canvas drawing ---------- */
@@ -54,30 +66,29 @@ export function drawCode(e) {
   ctx.roundRect(e.x, e.y, e.w, e.h, r);
   ctx.fill();
   ctx.stroke();
+  ctx.clip();
   ctx.font = mono(m.fs);
   ctx.textBaseline = 'top';
-  const text = e.text || '', toks = tokenize(e.lang || 'js', text);
-  let off = 0;
-  m.lines.forEach((l, i) => {
+  const toks = tokenize(e.lang || 'js', e.text || ''), x0 = e.x + PAD + m.gut;
+  m.rows.forEach((row, i) => {
     const y = e.y + PAD + i * m.lh + (m.lh - m.fs) / 2;
-    if (m.gut) {
+    if (m.gut && row.first) {
       ctx.fillStyle = dark ? '#5d667a' : '#9aa1ae';
       ctx.textAlign = 'right';
-      ctx.fillText(String(i + 1), e.x + m.gut - 8, y);
+      ctx.fillText(String(row.n + 1), e.x + m.gut - 8, y);
     }
     ctx.textAlign = 'left';
     // draw one run at a time so each token keeps its color
-    const x0 = e.x + PAD + m.gut;
     let a = 0;
+    const l = row.s;
     while (a < l.length) {
-      const k = kindAt(toks, off + a);
+      const k = kindAt(toks, row.a + a);
       let b = a + 1;
-      while (b < l.length && kindAt(toks, off + b) === k) b++;
+      while (b < l.length && kindAt(toks, row.a + b) === k) b++;
       ctx.fillStyle = (k && pal[k]) || (dark ? '#e6e9ef' : '#1c2230');
-      ctx.fillText(l.slice(a, b), x0 + ctx.measureText(l.slice(0, a)).width, y);
+      ctx.fillText(l.slice(a, b), x0 + a * m.cw, y);
       a = b;
     }
-    off += l.length + 1;
   });
   if (m.gut) {
     ctx.strokeStyle = dark ? '#343b4d' : '#d5d9e0';
@@ -102,7 +113,7 @@ function toHTML(text, lang) {
 }
 export function openCode(x, y, e0) {
   needX();
-  const v = P().v, fs = e0 ? e0.fs || 18 : 18;
+  const v = P().v, fs = e0 ? e0.fs || 18 : ST.cfs || 18, W = e0 ? e0.w : CODE_W, H = e0 ? e0.h : CODE_H;
   let lang = e0 ? e0.lang || 'js' : ST.clang || 'js';
   const wrap = document.createElement('div'),
     gut = document.createElement('div'),
@@ -110,7 +121,7 @@ export function openCode(x, y, e0) {
     t = document.createElement('textarea'),
     bar = document.createElement('div');
   wrap.className = 'codeed';
-  wrap.style.cssText = `left:${x * v.z + v.x + OX() * v.z}px;top:${y * v.z + v.y}px;font:${fs * v.z}px ${FF.mono};line-height:${LH};padding:${PAD * v.z}px`;
+  wrap.style.cssText = `left:${x * v.z + v.x + OX() * v.z}px;top:${y * v.z + v.y}px;width:${W * v.z}px;min-height:${H * v.z}px;font:${fs * v.z}px ${FF.mono};line-height:${LH};padding:${PAD * v.z}px`;
   wrap.classList.toggle('dk', isDark());
   gut.className = 'cg';
   pre.className = 'cp';
@@ -120,7 +131,7 @@ export function openCode(x, y, e0) {
   t.spellcheck = false;
   t.setAttribute('autocapitalize', 'off');
   t.setAttribute('aria-label', 'Code editor');
-  t.wrap = 'off';
+  t.wrap = 'soft';
   bar.className = 'cb';
   bar.innerHTML = '<select aria-label="Language">' + Object.keys(LANGS).map(k => `<option value="${k}"${k === lang ? ' selected' : ''}>${LANGS[k][0]}</option>`).join('') + '</select><label><input type="checkbox" class="nums"' + (!e0 || e0.nums !== false ? ' checked' : '') + '> Line numbers</label><button class="b" type="button">Done</button>';
   const box = document.createElement('div');
@@ -132,15 +143,16 @@ export function openCode(x, y, e0) {
   if (e0) {
     e0.hide = true;
   }
+  // same wrapping as the canvas: numbers only on the first row of each line, blank rows for its continuations
   const sync = () => {
-    const lines = t.value.split('\n'), nums = bar.querySelector('.nums').checked;
+    const nums = bar.querySelector('.nums').checked, m = codeMetrics({ text: t.value, fs, w: W, nums });
     gut.hidden = !nums;
-    gut.textContent = nums ? lines.map((_, i) => i + 1).join('\n') : '';
+    gut.style.width = m.gut * v.z + 'px';
+    gut.textContent = nums ? m.rows.map(r => r.first ? r.n + 1 : '').join('\n') : '';
     pre.innerHTML = toHTML(t.value, lang);
-    ST.ctx.font = `${fs * v.z}px ${FF.mono}`;
-    const w = Math.max(...lines.map(l => ST.ctx.measureText(l).width), 20 * v.z) + 12 * v.z;
-    t.style.width = pre.style.width = w + 'px';
-    t.style.height = pre.style.height = lines.length * fs * LH * v.z + 'px';
+    const cw = m.per * m.cw * v.z;
+    t.style.width = pre.style.width = cw + 1 + 'px';
+    t.style.height = pre.style.height = Math.max(m.rows.length * fs * LH, H - PAD * 2) * v.z + 'px';
   };
   sync();
   setTimeout(() => {
@@ -202,7 +214,7 @@ export function openCode(x, y, e0) {
       commit();
       props();
     } else if (s.trim()) {
-      const e = { id: uid(), t: 'code', x, y, w: 0, h: 0, stroke: ST.stroke, fill: 'none', sw: 1, seed: 1, text: s, lang, fs, nums };
+      const e = { id: uid(), t: 'code', x, y, w: CODE_W, h: CODE_H, stroke: ST.stroke, fill: 'none', sw: 1, seed: 1, text: s, lang, fs, nums };
       codeFit(e);
       P().els.push(e);
       ST.sel = e.id;

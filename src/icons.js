@@ -55,6 +55,23 @@ import fileExport from '@tabler/icons/outline/file-export.svg?raw';
 import notebook from '@tabler/icons/outline/notebook.svg?raw';
 import file from '@tabler/icons/outline/file.svg?raw';
 import download from '@tabler/icons/outline/download.svg?raw';
+import highlight from '@tabler/icons/outline/highlight.svg?raw';
+import hexagon from '@tabler/icons/outline/hexagon.svg?raw';
+import chartLine from '@tabler/icons/outline/chart-line.svg?raw';
+import rowTop from '@tabler/icons/outline/row-insert-top.svg?raw';
+import rowBottom from '@tabler/icons/outline/row-insert-bottom.svg?raw';
+import colLeft from '@tabler/icons/outline/column-insert-left.svg?raw';
+import colRight from '@tabler/icons/outline/column-insert-right.svg?raw';
+import rowRemove from '@tabler/icons/outline/row-remove.svg?raw';
+import colRemove from '@tabler/icons/outline/column-remove.svg?raw';
+import merge from '@tabler/icons/outline/arrows-join.svg?raw';
+import alignLeft from '@tabler/icons/outline/align-left.svg?raw';
+import alignCenter from '@tabler/icons/outline/align-center.svg?raw';
+import alignRight from '@tabler/icons/outline/align-right.svg?raw';
+import tableOptions from '@tabler/icons/outline/table-options.svg?raw';
+import check from '@tabler/icons/outline/check.svg?raw';
+import refresh from '@tabler/icons/outline/refresh.svg?raw';
+import keyboard from '@tabler/icons/outline/keyboard.svg?raw';
 
 const strip = s => s.replace(/<svg[^>]*>/, '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">').replace(/<path stroke="none"[^>]*\/>/, '');
 export const I = {
@@ -114,4 +131,21 @@ export const I = {
   notebook: strip(notebook),
   file: strip(file),
   download: strip(download),
+  highlight: strip(highlight),
+  hexagon: strip(hexagon),
+  chartLine: strip(chartLine),
+  rowTop: strip(rowTop),
+  rowBottom: strip(rowBottom),
+  colLeft: strip(colLeft),
+  colRight: strip(colRight),
+  rowRemove: strip(rowRemove),
+  colRemove: strip(colRemove),
+  merge: strip(merge),
+  alignLeft: strip(alignLeft),
+  alignCenter: strip(alignCenter),
+  alignRight: strip(alignRight),
+  tableOptions: strip(tableOptions),
+  check: strip(check),
+  keyboard: strip(keyboard),
+  refresh: strip(refresh),
 };

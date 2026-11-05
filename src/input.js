@@ -2,13 +2,13 @@ import { P, ST } from './state.js';
 import { $, cv, esc, uid } from './util.js';
 import { save } from './cloud.js';
 import { FF, G, col, needX, rot } from './env.js';
-import { A4H, A4W, GAP, OX, bb, cl, commit, cpts, draw, hdl, spreadOf, tfit } from './render.js';
+import { A4H, A4W, GAP, OX, bb, cl, commit, cpts, draw, hdl, polyPts, spreadOf, tfit } from './render.js';
 import { cur, selIds, union } from './edit.js';
 import { compPlace, openLabel, wpts } from './circuit.js';
-import { TCOL, THL, badgePos, linkOf, openCell, openLink, tablePlace } from './objects.js';
+import { TCOL, THL, badgePos, cellAt, linkOf, openCell, openLink, tablePlace, tgeo } from './objects.js';
 import { openMath } from './math.js';
 import { closePops, props, setTool } from './toolbar.js';
-import { openCode } from './code.js';
+import { codeFit, openCode } from './code.js';
 import { switchPage } from './notebooks.js';
 
 const w2 = (px, py) => {
@@ -42,9 +42,12 @@ function hit(x0, y0) {
       for (let j = 0; j < q.length - 1; j++) if (dseg(x, y, q[j][0], q[j][1], q[j + 1][0], q[j + 1][1]) < tol) return e;
     } else if (e.t === 'line' || e.t === 'arrow') {
       if (dseg(x, y, e.x, e.y, e.x + e.w, e.y + e.h) < tol) return e;
+    } else if (e.t === 'poly' && e.fill === 'none') {
+      const q = polyPts(b, e.n || 5);
+      for (let j = 0; j < q.length; j++) if (dseg(x, y, ...q[j], ...q[(j + 1) % q.length]) < tol) return e;
     } else if (e.t === 'free') {
       for (let j = 0; j < e.pts.length; j++) if (Math.hypot(x - e.x - e.pts[j][0], y - e.y - e.pts[j][1]) < tol + e.sw) return e;
-    } else if (e.t === 'text' || e.t === 'code' || e.t === 'math' || e.t === 'img' || e.t === 'comp' || e.t === 'table' || e.fill !== 'none') {
+    } else if (e.t === 'text' || e.t === 'code' || e.t === 'math' || e.t === 'img' || e.t === 'comp' || e.t === 'table' || e.t === 'graph' || e.fill !== 'none') {
       if (x >= b.x - tol && x <= b.x + b.w + tol && y >= b.y - tol && y <= b.y + b.h + tol) return e;
     } else {
       const inside = x >= b.x - tol && x <= b.x + b.w + tol && y >= b.y - tol && y <= b.y + b.h + tol,
@@ -332,6 +335,17 @@ cv.addEventListener('pointerdown', ev => {
       return;
     }
     const s = p.els.find(e => e.id === ST.sel);
+    if (s && !s.lk && s.t === 'table' && !s.r) {
+      // dragging an inner grid line of the selected table resizes that row or column
+      const g = tgeo(s), tl = (ev.pointerType === 'touch' ? 14 : 6) / p.v.z;
+      const inY = y > s.y && y < s.y + s.h, inX = x > s.x && x < s.x + s.w;
+      const j = inY ? g.xs.slice(1, -1).findIndex(v => Math.abs(v - x) < tl) : -1;
+      const i = j < 0 && inX ? g.ys.slice(1, -1).findIndex(v => Math.abs(v - y) < tl) : -1;
+      if (j >= 0 || i >= 0) {
+        ST.act = { k: 'tgrid', e: s, j, i, x, y, cw: g.cw.slice(), rh: g.rh.slice(), w: s.w, h: s.h };
+        return;
+      }
+    }
     if (s && !s.lk) {
       const tol = (ev.pointerType === 'touch' ? 26 : 12) / p.v.z;
       for (const h of hdl(s)) if (Math.hypot(h.x - x, h.y - y) < tol) {
@@ -368,6 +382,7 @@ cv.addEventListener('pointerdown', ev => {
     }
     ST.msel = [];
     ST.sel = h ? h.id : null;
+    if (h && h.t === 'table') ST.tc = { id: h.id, ...cellAt(h, x, y) };
     if (h) {
       if (!h.lk) ST.act = {
         k: 'move',
@@ -408,7 +423,7 @@ cv.addEventListener('pointerdown', ev => {
       draw();
       openText(h.x, h.y, h);
     } else openText(...cl([x, y]));
-    setTool('select');
+    props();
     return;
   }
   if (ST.tool === 'code') {
@@ -419,7 +434,7 @@ cv.addEventListener('pointerdown', ev => {
       draw();
       openCode(h.x, h.y, h);
     } else openCode(...cl([x, y]));
-    setTool('select');
+    props();
     return;
   }
   if (ST.tool === 'math') {
@@ -439,7 +454,7 @@ cv.addEventListener('pointerdown', ev => {
   [x, y] = snp(x, y);
   const e = {
     id: uid(),
-    t: ST.tool,
+    t: ST.tool === 'hl' ? 'free' : ST.tool,
     x,
     y,
     w: 0,
@@ -452,7 +467,9 @@ cv.addEventListener('pointerdown', ev => {
     ds: ST.tds,
     ah: ST.tah
   };
-  if (ST.tool === 'free') e.pts = [[0, 0]];
+  if (ST.tool === 'free' || ST.tool === 'hl') e.pts = [[0, 0]];
+  if (ST.tool === 'hl') e.hl = 1;
+  if (ST.tool === 'poly') e.n = ST.sides;
   p.els.push(e);
   ST.act = {
     k: 'draw',
@@ -494,6 +511,20 @@ cv.addEventListener('pointermove', ev => {
       i.e.y = i.oy + q[1];
     });
     ST.act.m = 1;
+  } else if (ST.act.k === 'tgrid') {
+    const a = ST.act, e = a.e;
+    if (a.j >= 0) {
+      const nv = Math.max(24, a.cw[a.j] + x - a.x);
+      e.cw = a.cw.slice();
+      e.cw[a.j] = nv;
+      e.w = a.w + nv - a.cw[a.j];
+    } else {
+      const nv = Math.max(20, a.rh[a.i] + y - a.y);
+      e.rh = a.rh.slice();
+      e.rh[a.i] = nv;
+      e.h = a.h + nv - a.rh[a.i];
+    }
+    a.m = 1;
   } else if (ST.act.k === 'box') {
     ST.act.x2 = x;
     ST.act.y2 = y;
@@ -622,7 +653,8 @@ const up = ev => {
     props();
     return;
   }
-  if (a.k === 'move' || a.k === 'gmove' || a.k === 'erase' || a.k === 'rs') {
+  if (a.k === 'move' || a.k === 'gmove' || a.k === 'erase' || a.k === 'rs' || a.k === 'tgrid') {
+    if (a.k === 'rs' && a.e.t === 'code') codeFit(a.e);
     if (a.m) commit();else draw();
     return;
   }
@@ -634,7 +666,7 @@ const up = ev => {
   }
   ST.sel = e.id;
   commit();
-  if (ST.tool !== 'free' && ST.tool !== 'wire') setTool('select');
+  if (!['free', 'hl', 'wire'].includes(ST.tool)) setTool('select');
   props();
 };
 addEventListener('pointerup', up);
@@ -644,12 +676,13 @@ cv.addEventListener('dblclick', ev => {
   const [px, py] = pos(ev),
     q = w2(px, py),
     h = hit(q[0], q[1]);
-  if (h && h.t === 'math') {
+  if (h && (h.t === 'math' || h.t === 'graph')) {
     ST.sel = h.id;
     openMath(h.x, h.y, h);
   } else if (h && h.t === 'table') {
     ST.sel = h.id;
-    openCell(h, Math.min(h.nr - 1, Math.max(0, Math.floor((q[1] - h.y) / (h.h / h.nr)))), Math.min(h.nc - 1, Math.max(0, Math.floor((q[0] - h.x) / (h.w / h.nc)))));
+    const c = cellAt(h, q[0], q[1]);
+    openCell(h, c.i, c.j);
   } else if (h && h.t === 'code') {
     ST.sel = h.id;
     h.hide = true;

@@ -46,7 +46,7 @@ function newPage() {
   ST.S.cur = p.id;
   load();
 }
-const TOOLS = [['select', 'Select'], ['free', 'Pen'], ['rect', 'Rectangle'], ['diamond', 'Diamond'], ['ellipse', 'Ellipse'], ['arrow', 'Arrow'], ['curve', 'Curved arrow'], ['line', 'Line'], ['text', 'Text'], ['code', 'Code block'], ['math', 'Formula'], ['table', 'Table'], ['eraser', 'Eraser'], ['hand', 'Pan']];
+const TOOLS = [['select', 'Select'], ['free', 'Pen'], ['hl', 'Highlighter'], ['rect', 'Rectangle'], ['diamond', 'Diamond'], ['ellipse', 'Ellipse'], ['poly', 'Polygon'], ['arrow', 'Arrow'], ['curve', 'Curved arrow'], ['line', 'Line'], ['text', 'Text'], ['code', 'Code block'], ['math', 'Formula and graph'], ['table', 'Table'], ['eraser', 'Eraser'], ['hand', 'Pan']];
 function commands() {
   const c = TOOLS.map(([t, n]) => ({ label: 'Tool: ' + n, run: () => setTool(t) }));
   c.push(

@@ -22,7 +22,13 @@
 <aside id="panel" hidden aria-label="Properties"></aside>
 <div id="pgpop" class="bar" hidden></div><div id="bkpop" class="bar" hidden></div>
 <div id="cpal" class="bar" hidden></div>
-<div id="mbox" class="bar" hidden><textarea id="mtex" placeholder="LaTeX, e.g. x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}"></textarea><div id="mprev"></div><div id="msn"></div><div id="msv"></div><div id="mres"></div><button class="b" id="madd" hidden>Add result to page</button><div class="row"><button class="b ok" id="mok">Insert</button><button class="b" id="mno">Cancel</button></div></div>
+<div id="mbox" class="bar" hidden role="dialog" aria-label="Formula and graph">
+<div class="mh"><div class="seg" id="mtab" role="tablist"><button class="b on" data-mt="f" role="tab" aria-selected="true">Formula</button><button class="b" data-mt="g" role="tab" aria-selected="false">Graph</button></div><span class="grow"></span><button class="ib" id="mkb" title="Math keyboard" aria-label="Show math keyboard"></button><button class="ib" id="mno" title="Close (Esc)" aria-label="Close"></button></div>
+<div id="mfw"></div><textarea id="mtex" hidden placeholder="LaTeX, e.g. x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}" aria-label="Formula in LaTeX"></textarea>
+<div id="mpf"><div id="msv"></div><div id="mres" aria-live="polite"></div><button class="pill" id="madd" hidden>Add result to page</button></div>
+<div id="mpg" hidden><div class="mrng"><label class="nf"><span>x from</span><input id="gx0" type="number" inputmode="decimal" value="-10"></label><label class="nf"><span>to</span><input id="gx1" type="number" inputmode="decimal" value="10"></label><label class="nf"><span>y from</span><input id="gy0" type="number" inputmode="decimal" placeholder="auto"></label><label class="nf"><span>to</span><input id="gy1" type="number" inputmode="decimal" placeholder="auto"></label></div><canvas id="gprev" aria-label="Graph preview"></canvas><small class="mhint">Write y in terms of x. Separate several functions with ; e.g. sin(x); x^2/4</small></div>
+<div class="mfoot"><small class="mhint">Ctrl+Enter to insert</small><span class="grow"></span><button class="pill" id="mcancel">Cancel</button><button class="pill pri" id="mok">Insert formula</button></div>
+</div>
 <div id="cvdesc" class="sr"></div>
 </div>
 <aside id="reader" hidden><div class="rh"><b id="rt"></b><span class="grow"></span><a id="ro" class="b" target="_blank" rel="noopener">Open ↗</a><button id="rx" class="b" aria-label="Close reader">✕</button></div><small class="rn">If the page stays blank, that site does not allow embedding. Use “Open ↗” instead.</small><iframe id="rf" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups"></iframe></aside>

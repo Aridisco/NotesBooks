@@ -6,7 +6,7 @@ import { OX, commit, draw, fitA4, spreadOf, tfit, undo } from './render.js';
 import { endRename, load, nbOf, render } from './notebooks.js';
 import { ALN, ahHTML, align, cur, dssHTML, dupe, fitAll, selIds, union, zord } from './edit.js';
 import { togglePal } from './circuit.js';
-import { TBB, linkEd, tbl } from './objects.js';
+import { linkEd, tableMenuHTML, tbl } from './objects.js';
 import { toggleFS } from './platform.js';
 import { togglePanel } from './voice.js';
 import { I } from './icons.js';
@@ -16,17 +16,43 @@ import { exportPNG } from './edit.js';
 import { exportBookPDF, exportPagePDF, openPalette, pageHistory } from './palette.js';
 
 /* ---------- tool definitions ---------- */
-const SHAPES = [['rect', 'square', 'Rectangle (R)'], ['diamond', 'diamond', 'Diamond (D)'], ['ellipse', 'circle', 'Ellipse (O)'], ['arrow', 'arrowUpRight', 'Arrow (A)'], ['curve', 'arrowCurveRight', 'Curved arrow (C)'], ['line', 'line', 'Line (L)']];
-const MORE = [['eraser', 'eraser', 'Eraser (E)'], ['hand', 'handStop', 'Pan (H)'], ['math', 'mathFunction', 'Formula (M)'], ['img', 'photo', 'Image'], ['table', 'table', 'Table']];
+const SHAPES = [['rect', 'square', 'Rectangle (R)'], ['diamond', 'diamond', 'Diamond (D)'], ['ellipse', 'circle', 'Ellipse (O)'], ['poly', 'hexagon', 'Polygon (G)'], ['arrow', 'arrowUpRight', 'Arrow (A)'], ['curve', 'arrowCurveRight', 'Curved arrow (C)'], ['line', 'line', 'Line (L)']];
+const MORE = [['eraser', 'eraser', 'Eraser (E)'], ['hand', 'handStop', 'Pan (H)'], ['math', 'mathFunction', 'Formula and graph (M)'], ['img', 'photo', 'Image'], ['table', 'table', 'Table']];
 const CIRC = [['wire', 'bolt', 'Wire (orthogonal)'], ['cpal', 'bolt', 'Circuit components']];
 const SC = ['auto', '#e03131', '#f08c00', '#2f9e44', '#1971c2', '#74c0fc', '#c2255c', '#7048e8'];
 const FC = ['none', '#ffc9c9', '#b2f2bb', '#a5d8ff', '#ffec99'];
 const PRESETS = { h1: 48, h2: 36, h3: 28, body: 24 };
-const SIZABLE = ['rect', 'diamond', 'ellipse', 'img', 'math', 'table', 'comp'];
+const SIZABLE = ['rect', 'diamond', 'ellipse', 'poly', 'img', 'math', 'table', 'comp', 'code', 'graph'];
 const KEEP_RATIO = ['img', 'math'];
+// Tools on the bottom bar, in order; select and "more" are always shown, the rest can be hidden by the user.
+const BAR = [['select', 'pointer', 'Select (V)'], ['free', 'pencil', 'Pen (P)'], ['hl', 'highlight', 'Highlighter (I)'], ['shapes'], ['text', 'typography', 'Text (T)'], ['code', 'code', 'Code block (K)'], ['more']];
+// Each drawing tool keeps its own editable colors and sizes, like Notability's per-tool favorites.
+const DEF_TB = () => ({
+  hidden: [],
+  g: {
+    pen: { cols: SC.slice(), sizes: [1, 2, 4], c: 'auto', w: 2 },
+    hl: { cols: ['#ffd43b', '#69db7c', '#74c0fc', '#f783ac', '#ffa94d'], sizes: [12, 20, 30], c: '#ffd43b', w: 20 },
+    shape: { cols: SC.slice(), sizes: [1, 2, 4], c: 'auto', w: 2 },
+    text: { cols: ['auto', '#e03131', '#2f9e44', '#1971c2', '#f08c00', '#7048e8'], c: 'auto' }
+  }
+});
+let TB = DEF_TB();
+try {
+  const t = JSON.parse(localStorage.getItem('sketchbooks-toolbar'));
+  if (t && t.g) TB = { hidden: t.hidden || [], g: Object.assign(DEF_TB().g, t.g) };
+} catch (e) {}
+const saveTB = () => {
+  try {
+    localStorage.setItem('sketchbooks-toolbar', JSON.stringify(TB));
+  } catch (e) {}
+};
+const grp = t => t === 'free' ? 'pen' : t === 'hl' ? 'hl' : t === 'text' ? 'text' : t === 'code' ? 'code' : SHAPES.some(x => x[0] === t) ? 'shape' : null;
 
 ST.shape = ST.shape || 'rect';
+ST.sides = ST.sides || 5;
+ST.cfs = ST.cfs || 18;
 ST.panel = false;
+ST.tbEdit = false;
 try {
   ST.recent = JSON.parse(localStorage.getItem('sketchbooks-recent')) || [];
 } catch (e) {
@@ -40,22 +66,44 @@ export function closePops() {
   ['#toolpop', '#pgpop', '#bkpop'].forEach(s => $(s).hidden = true);
 }
 
-/* ---------- bottom tool bar ---------- */
+/* ---------- bottom tool bar: options row (changes with the tool) + tools row ---------- */
+const dot = (w, on, i) => `<button class="wd${on ? ' on' : ''}" data-w="${w}" ${i != null ? `data-wi="${i}"` : ''} aria-label="Size ${w}" aria-pressed="${on}"><i style="width:${Math.min(26, 3 + w * (w > 6 ? .8 : 3))}px;height:${Math.min(26, 3 + w * (w > 6 ? .8 : 3))}px"></i></button>`;
+let lastGrp = null;
+function optionsRow() {
+  const g = grp(ST.tool), top = 'trow top' + (g !== lastGrp ? ' anim' : '');
+  lastGrp = g;
+  if (!g) return '';
+  const G = TB.g[g], ed = ST.tbEdit;
+  if (g === 'code') return '<div class="' + top + '"><span class="tl">Code</span><select id="tcl" aria-label="Language">' + Object.keys(LANGS).map(k => `<option value="${k}"${(ST.clang || 'js') === k ? ' selected' : ''}>${LANGS[k][0]}</option>`).join('') + '</select><span class="sep"></span>' +
+    [[14, 'S'], [18, 'M'], [24, 'L']].map(x => `<button class="b${ST.cfs === x[0] ? ' on' : ''}" data-cfs="${x[0]}" aria-label="Code size ${x[1]}" aria-pressed="${ST.cfs === x[0]}">${x[1]}</button>`).join('') + '</div>';
+  let h = '<div class="' + top + '">';
+  // colors: tap to pick, or edit them in place while customizing
+  h += G.cols.map((c, i) => ed ? `<label class="sw edit" style="background:${c === 'auto' ? 'var(--ink)' : c}" title="Change color"><input type="color" data-ec="${i}" value="${hex(c, '#1c2230')}" aria-label="Change color ${i + 1}"></label>` : swatch('s', c, G.c)).join('');
+  if (!ed) h += customColor('stroke', G.c, 'Custom color');
+  if (g === 'text') {
+    h += '<span class="sep"></span>' + [['h1', 'H1'], ['h2', 'H2'], ['h3', 'H3'], ['body', 'Aa']].map(x => `<button class="b${ST.tfs === PRESETS[x[0]] ? ' on' : ''}" data-ps="${x[0]}" aria-label="Text size ${x[0]}" aria-pressed="${ST.tfs === PRESETS[x[0]]}">${x[1]}</button>`).join('') +
+      '<select id="tff" aria-label="Font">' + Object.keys(FF).map(k => `<option value="${k}" ${ST.tff === k ? 'selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('') + '</select>';
+  } else {
+    h += '<span class="sep"></span>' + G.sizes.map((w, i) => ed ? `<label class="nf sm"><input type="number" data-ew="${i}" value="${w}" min="0.5" max="60" step="0.5" inputmode="decimal" aria-label="Size ${i + 1}"></label>` : dot(w, G.w === w)).join('');
+    if (ST.tool === 'poly' && !ed) h += '<span class="sep"></span><span class="step" role="group" aria-label="Polygon sides"><button class="b" data-sd="-1" aria-label="Fewer sides">−</button><b>' + ST.sides + '</b><small>sides</small><button class="b" data-sd="1" aria-label="More sides">+</button></span>';
+  }
+  h += '<span class="sep"></span>' + (ed ? ib('refresh', 'Reset colors and sizes', 'data-tbr="1"') + ib('check', 'Done customizing', 'data-tbe="1"', true) : ib('palette', 'Customize this bar', 'data-tbe="1"'));
+  return h + '</div>';
+}
 function renderTools() {
-  const t = ST.tool, circ = P().circ;
+  const t = ST.tool, circ = P().circ, ed = ST.tbEdit;
   const shape = SHAPES.find(x => x[0] === ST.shape) || SHAPES[0];
   const isShape = SHAPES.some(x => x[0] === t);
   const isMore = MORE.some(x => x[0] === t) || t === 'wire' || t === 'comp';
-  const sel = P().els.find(e => e.id === ST.sel), stroke = sel ? sel.stroke : ST.stroke, sw = sel ? sel.sw : ST.sw;
-  // Notability-style: colors + stroke widths on top, tools below
-  $('#tools').innerHTML = '<div class="trow">' + SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '<span class="sep"></span>' +
-    [1, 2, 4].map(w => `<button class="wd${sw === w ? ' on' : ''}" data-w="${w}" aria-label="Line width ${w}"><i style="width:${w * 3 + 3}px;height:${w * 3 + 3}px"></i></button>`).join('') + '</div><div class="trow">' +
-    ib('pointer', 'Select (V)', 'data-t="select" aria-pressed="' + (t === 'select') + '"', t === 'select') +
-    ib('pencil', 'Draw (P)', 'data-t="free" aria-pressed="' + (t === 'free') + '"', t === 'free') +
-    ib(shape[1], 'Shapes: ' + shape[2], 'data-g="shapes" aria-haspopup="true"', isShape) +
-    ib('typography', 'Text (T)', 'data-t="text" aria-pressed="' + (t === 'text') + '"', t === 'text') +
-    ib('code', 'Code block (K)', 'data-t="code" aria-pressed="' + (t === 'code') + '"', t === 'code') +
-    ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore) + '</div>';
+  const tools = BAR.map(([k, icon, label]) => {
+    if (k === 'more') return ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore);
+    const off = TB.hidden.includes(k);
+    if (off && !ed) return '';
+    const btn = k === 'shapes' ? ib(shape[1], 'Shapes: ' + shape[2], (ed ? 'data-hide="shapes"' : 'data-g="shapes" aria-haspopup="true"'), isShape && !ed) :
+      ib(icon, label, ed && k !== 'select' ? `data-hide="${k}" aria-pressed="${!off}"` : `data-t="${k}" aria-pressed="${t === k}"`, t === k && !ed);
+    return off ? btn.replace('class="ib', 'class="ib hid') : btn;
+  }).join('');
+  $('#tools').innerHTML = optionsRow() + '<div class="trow">' + tools + '</div>' + (ed ? '<div class="trow hint">Tap a color or size to change it · tap a tool to show or hide it</div>' : '');
 }
 function openPop(g) {
   const pop = $('#toolpop');
@@ -65,11 +113,16 @@ function openPop(g) {
   if (was) return;
   pop.dataset.g = g;
   pop.innerHTML = list.map(x => ib(x[1], x[2], 'data-t="' + x[0] + '"', x[0] === ST.tool || (x[0] === 'cpal' && ST.tool === 'comp'))).join('');
+  pop.style.bottom = $('#main').getBoundingClientRect().bottom - $('#tools').getBoundingClientRect().top + 10 + 'px';
   pop.hidden = false;
 }
 export function setTool(t) {
   ST.tool = t;
   if (SHAPES.some(x => x[0] === t)) ST.shape = t;
+  // each drawing tool brings back its own color and size
+  const G = TB.g[grp(t)];
+  if (G && G.c) ST.stroke = G.c;
+  if (G && G.w) ST.sw = G.w;
   cv.style.cursor = t === 'select' ? 'default' : t === 'hand' ? 'grab' : t === 'text' || t === 'code' ? 'text' : 'crosshair';
   closePops();
   props();
@@ -77,15 +130,68 @@ export function setTool(t) {
 function toolClick(e) {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.s || b.dataset.w) return propsClick(e);
-  if (b.dataset.g) return openPop(b.dataset.g);
-  const t = b.dataset.t;
+  const d = b.dataset, G = TB.g[grp(ST.tool)];
+  if (d.tbe) {
+    ST.tbEdit = !ST.tbEdit;
+    return renderTools();
+  }
+  if (d.tbr) {
+    const def = DEF_TB().g[grp(ST.tool)];
+    if (def) TB.g[grp(ST.tool)] = def;
+    saveTB();
+    return setTool(ST.tool);
+  }
+  if (d.hide) {
+    TB.hidden = TB.hidden.includes(d.hide) ? TB.hidden.filter(x => x !== d.hide) : [...TB.hidden, d.hide];
+    saveTB();
+    return renderTools();
+  }
+  if (d.sd) {
+    ST.sides = Math.max(3, Math.min(12, ST.sides + +d.sd));
+    return renderTools();
+  }
+  if (d.cfs) {
+    ST.cfs = +d.cfs;
+    return renderTools();
+  }
+  if (d.s || d.w) {
+    if (G && d.s) G.c = d.s;
+    if (G && d.w) G.w = +d.w;
+    saveTB();
+    return propsClick(e);
+  }
+  if (d.ps) return propsClick(e);
+  if (d.g) return openPop(d.g);
+  const t = d.t;
   if (!t) return;
   closePops();
   if (t === 'img') $('#imgf').click();else if (t === 'cpal') togglePal();else setTool(t);
 }
 $('#tools').onclick = toolClick;
 $('#toolpop').onclick = toolClick;
+// editing a favorite color or size while customizing, plus the code language and text font pickers
+$('#tools').addEventListener('change', e => {
+  const t = e.target, G = TB.g[grp(ST.tool)];
+  if (t.id === 'tcl') ST.clang = t.value;
+  if (t.id === 'tff') ST.tff = t.value;
+  if (t.dataset.ec && G) {
+    const i = +t.dataset.ec, was = G.cols[i];
+    G.cols[i] = t.value;
+    if (G.c === was) G.c = ST.stroke = t.value;
+    saveTB();
+  }
+  if (t.dataset.ew && G && +t.value > 0) {
+    const i = +t.dataset.ew, was = G.sizes[i];
+    G.sizes[i] = +t.value;
+    if (G.w === was) G.w = ST.sw = +t.value;
+    saveTB();
+  }
+  if (t.dataset.cs && G) {
+    G.c = t.value;
+    saveTB();
+  }
+  renderTools();
+});
 // Tapping anywhere outside an open menu closes it.
 document.addEventListener('pointerdown', e => {
   if (!e.target.closest('#pgpop,#toolpop,#bkpop,[aria-haspopup]')) closePops();
@@ -114,7 +220,10 @@ function topHTML() {
 function ctxHTML(s) {
   const c = cur();
   const stroke = s ? s.stroke : ST.stroke;
-  return SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '<span class="sep"></span>' +
+  const one = c.length === 1 ? c[0] : null;
+  return (one && one.t === 'table' ? ib('tableOptions', 'Table: rows, columns, cells', 'data-a="m-table" aria-haspopup="true"') + '<span class="sep"></span>' : '') +
+    (one && one.t === 'poly' ? numField('n', 'Sides', one.n || 5, 3, 12) + '<span class="sep"></span>' : '') +
+    SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '<span class="sep"></span>' +
     ib('copy', 'Duplicate (Ctrl+D)', 'data-a="dup"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock"', c.every(q => q.lk)) + ib('trash', 'Delete', 'data-a="del"') +
     '<span class="sep"></span>' + ib('adjustments', 'All properties', 'data-a="panel"', ST.panel);
 }
@@ -150,7 +259,7 @@ function panelHTML(s) {
       '<div class="pr">' + numField('fs', 'Size px', fs, 8, 300) + '<select id="ffs" title="Font" aria-label="Font">' + Object.keys(FF).map(k => `<option value="${k}" ${((s && s.t === 'text' ? s.ff : ST.tff) || 'hand') === k ? 'selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('') + '</select></div>';
   }
   if (c.length) {
-    h += '<div class="pt">Arrange</div><div class="pr">' + ALN() + (c.some(q => q.t === 'comp') ? ib('rotateClockwise', 'Rotate 90°', 'data-a="rot"') : '') + (c.some(q => q.t === 'table') ? TBB : '') +
+    h += '<div class="pt">Arrange</div><div class="pr">' + ALN() + (c.some(q => q.t === 'comp') ? ib('rotateClockwise', 'Rotate 90°', 'data-a="rot"') : '') + 
       ib('link', 'Add / edit link', 'data-a="link"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock"', c.every(q => q.lk)) +
       ib('copy', 'Duplicate (Ctrl+D)', 'data-a="dup"') + `<button class="b" data-a="fr" aria-label="Bring to front">Front</button><button class="b" data-a="bk" aria-label="Send to back">Back</button>` + ib('trash', 'Delete', 'data-a="del"') + '</div>';
   }
@@ -234,6 +343,10 @@ function setNum(k, v) {
         codeFit(q);
       }
     });
+  } else if (k === 'n') {
+    const n = Math.round(Math.max(3, Math.min(12, v)));
+    ST.sides = n;
+    c.forEach(q => q.t === 'poly' && (q.n = n));
   } else if (k === 'w' || k === 'h') {
     const q = c[0];
     if (!q || c.length !== 1) return false;
@@ -482,6 +595,7 @@ function appearanceHTML() {
 }
 function menuHTML(m) {
   const p = P();
+  if (m === 'table') return tableMenuHTML();
   if (m === 'share') return '<b>Export</b>' + mi('photo', 'Page as image (PNG)', 'data-a="png"') + mi('fileTypePdf', 'Page as PDF', 'data-a="pdf"') + mi('fileExport', 'Whole notebook as PDF', 'data-a="pdfbook"');
   if (m === 'page') return seg('Sheet', [['inf', 'Infinite'], ['a4', 'A4'], ['a4x2', 'Two A4']].map(x => mb(x[1], 'data-pm="' + x[0] + '"', x[0] === 'a4x2' ? !!spreadOf(p) : !spreadOf(p) && (p.mode || 'inf') === x[0])).join('')) +
     seg('Pattern', [['none', 'Blank'], ['dots', 'Dots'], ['lines', 'Lines'], ['squares', 'Grid']].map(x => mb(x[1], 'data-pp="' + x[0] + '"', (p.pat || 'dots') === x[0])).join('')) +
@@ -503,13 +617,22 @@ export function pgpop(mode, toggle) {
   h.innerHTML = menuHTML(mode);
   h.hidden = false;
   const a = document.querySelector(mode === 'lib' ? '[data-a="lmore"]' : `[data-a="m-${mode}"]`);
-  const r = a ? a.getBoundingClientRect() : { bottom: 64, right: innerWidth - 8 };
-  h.style.top = r.bottom + 8 + 'px';
-  h.style.right = Math.max(8, innerWidth - r.right - 4) + 'px';
+  const r = a ? a.getBoundingClientRect() : { top: 56, bottom: 64, left: innerWidth - 48, right: innerWidth - 8 };
+  // open below the button, lined up with whichever of its edges keeps the menu on screen; flip above when there is more room there
+  h.style.left = h.style.right = h.style.top = h.style.bottom = '';
+  if (r.left + r.right > innerWidth) h.style.right = Math.max(8, innerWidth - r.right - 4) + 'px';else h.style.left = Math.max(8, r.left - 4) + 'px';
+  const below = innerHeight - r.bottom - 16, above = r.top - 16, up = h.offsetHeight > below && above > below;
+  if (up) h.style.bottom = innerHeight - r.top + 8 + 'px';else h.style.top = r.bottom + 8 + 'px';
+  h.style.maxHeight = (up ? above : below) + 'px';
+  h.style.transformOrigin = (up ? 'bottom ' : 'top ') + (h.style.right ? 'right' : 'left');
 }
 $('#pgpop').onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.tb) {
+    tbl(b.dataset.tb);
+    return pgpop('table');
+  }
   if (b.dataset.sk || b.dataset.md) {
     setAppearance(b.dataset.sk ? 'skin' : 'mode', b.dataset.sk || b.dataset.md);
     return pgpop(popMode);
@@ -644,7 +767,9 @@ addEventListener('keydown', e => {
     m: 'math',
     c: 'curve',
     e: 'eraser',
-    h: 'hand'
+    h: 'hand',
+    g: 'poly',
+    i: 'hl'
   }[k];
   if (m && !mk) {
     e.preventDefault();

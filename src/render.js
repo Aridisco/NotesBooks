@@ -4,7 +4,8 @@ import { save } from './cloud.js';
 import { BBC, COARSE, FF, LITE, VER, col, css, custom, dpr, inkFor, needX, rl, rng, rot } from './env.js';
 import { imgSrc } from './edit.js';
 import { compDraw, wpts } from './circuit.js';
-import { badgePos, linkOf } from './objects.js';
+import { badgePos, drawTable, linkOf, tcellRect } from './objects.js';
+import { drawGraph } from './graph.js';
 import { BKC, bkBmp } from './books.js';
 import { placeCtx } from './toolbar.js';
 import { drawCode } from './code.js';
@@ -22,6 +23,15 @@ export function cpts(e) {
     const t = i / 20,
       u = 1 - t;
     o.push([u * u * x0 + 2 * u * t * x1 + t * t * x2, u * u * y0 + 2 * u * t * y1 + t * t * y2]);
+  }
+  return o;
+}
+// Corners of a regular polygon inscribed in the box, first corner at the top.
+export function polyPts(b, n) {
+  const o = [];
+  for (let k = 0; k < n; k++) {
+    const a = -Math.PI / 2 + k * 2 * Math.PI / n;
+    o.push([b.x + b.w / 2 + Math.cos(a) * b.w / 2, b.y + b.h / 2 + Math.sin(a) * b.h / 2]);
   }
   return o;
 }
@@ -144,39 +154,8 @@ function drawEl(e) {
   ST.ctx.strokeStyle = col(e.stroke);
   ST.ctx.lineCap = ST.ctx.lineJoin = 'round';
   ST.ctx.fillStyle = e.fill === 'none' ? 'transparent' : e.fill;
-  if (e.t === 'table') {
-    const cw = e.w / e.nc,
-      rh = e.h / e.nr,
-      fs = Math.max(8, Math.min(18, rh * .5));
-    ST.ctx.fillStyle = css('--accbg');
-    ST.ctx.fillRect(e.x, e.y, e.w, rh);
-    ST.ctx.beginPath();
-    for (let i = 0; i <= e.nr; i++) {
-      ST.ctx.moveTo(e.x, e.y + i * rh);
-      ST.ctx.lineTo(e.x + e.w, e.y + i * rh);
-    }
-    for (let j = 0; j <= e.nc; j++) {
-      ST.ctx.moveTo(e.x + j * cw, e.y);
-      ST.ctx.lineTo(e.x + j * cw, e.y + e.h);
-    }
-    ST.ctx.stroke();
-    ST.ctx.save();
-    ST.ctx.fillStyle = col(e.stroke);
-    ST.ctx.font = `600 ${fs}px Figtree,system-ui,sans-serif`;
-    ST.ctx.textBaseline = 'middle';
-    for (let i = 0; i < e.nr; i++) for (let j = 0; j < e.nc; j++) {
-      const t = e.cells[i] && e.cells[i][j];
-      if (!t) continue;
-      ST.ctx.save();
-      ST.ctx.beginPath();
-      ST.ctx.rect(e.x + j * cw + 3, e.y + i * rh, cw - 6, rh);
-      ST.ctx.clip();
-      ST.ctx.fillText(t, e.x + j * cw + 6, e.y + (i + .5) * rh);
-      ST.ctx.restore();
-    }
-    ST.ctx.restore();
-    return;
-  }
+  if (e.t === 'table') return drawTable(e);
+  if (e.t === 'graph') return drawGraph(e);
   if (e.t === 'curve') {
     const R = r.R,
       x2 = e.x + e.w,
@@ -285,15 +264,15 @@ function drawEl(e) {
     rl(ST.ctx, b.x + b.w, b.y, b.x + b.w, b.y + b.h, r);
     rl(ST.ctx, b.x + b.w, b.y + b.h, b.x, b.y + b.h, r);
     rl(ST.ctx, b.x, b.y + b.h, b.x, b.y, r);
-  } else if (e.t === 'diamond') {
-    const m = [[b.x + b.w / 2, b.y], [b.x + b.w, b.y + b.h / 2], [b.x + b.w / 2, b.y + b.h], [b.x, b.y + b.h / 2]];
+  } else if (e.t === 'diamond' || e.t === 'poly') {
+    const m = e.t === 'poly' ? polyPts(b, e.n || 5) : [[b.x + b.w / 2, b.y], [b.x + b.w, b.y + b.h / 2], [b.x + b.w / 2, b.y + b.h], [b.x, b.y + b.h / 2]];
     if (e.fill !== 'none') {
       ST.ctx.beginPath();
       m.forEach((p, i) => i ? ST.ctx.lineTo(...p) : ST.ctx.moveTo(...p));
       ST.ctx.fill();
     }
     ST.ctx.beginPath();
-    m.forEach((p, i) => rl(ST.ctx, p[0], p[1], m[(i + 1) % 4][0], m[(i + 1) % 4][1], r));
+    m.forEach((p, i) => rl(ST.ctx, p[0], p[1], m[(i + 1) % m.length][0], m[(i + 1) % m.length][1], r));
   } else if (e.t === 'ellipse') {
     const cx = b.x + b.w / 2,
       cy = b.y + b.h / 2;
@@ -339,6 +318,14 @@ function drawEl(e) {
   ST.ctx.stroke();
 }
 export function drawR(e) {
+  if (e.hl) {
+    // highlighter: one translucent stroke so overlaps inside it do not darken
+    ST.ctx.save();
+    ST.ctx.globalAlpha = .4;
+    drawEl(e);
+    ST.ctx.restore();
+    return;
+  }
   if (!e.r) return drawEl(e);
   const b = bb(e);
   ST.ctx.save();
@@ -516,13 +503,16 @@ function drawNow() {
       vy0 = -v.y / v.z - 40,
       vx1 = vx0 + cv.clientWidth / v.z + 80,
       vy1 = vy0 + cv.clientHeight / v.z + 80;
-    pg.els.forEach(e => {
+    const vis = e => {
       if (!e.r && e.t !== 'text') {
         const b = bb(e);
         if (b.x > vx1 || b.y > vy1 || b.x + b.w < vx0 || b.y + b.h < vy0) return;
       }
       drawR(e);
-    });
+    };
+    // highlighter strokes go under everything else, like ink over a marker
+    pg.els.forEach(e => e.hl && vis(e));
+    pg.els.forEach(e => !e.hl && vis(e));
     if (a4) ST.ctx.restore();
   };
   sheets.forEach(([pg, o]) => paper(pg, o));
@@ -606,6 +596,16 @@ function drawNow() {
     ST.ctx.save();
     ST.ctx.strokeStyle = acc;
     ST.ctx.lineWidth = 1.5 / z;
+    if (s.t === 'table' && ST.tc && ST.tc.id === s.id) {
+      const c = tcellRect(s, ST.tc.i, ST.tc.j);
+      if (c) {
+        ST.ctx.save();
+        ST.ctx.setLineDash([]);
+        ST.ctx.lineWidth = 2.5 / z;
+        ST.ctx.strokeRect(c.x, c.y, c.w, c.h);
+        ST.ctx.restore();
+      }
+    }
     hdl(s).forEach(h => {
       const sz = (COARSE ? 9 : 6) / z;
       ST.ctx.beginPath();
