@@ -10,6 +10,7 @@ import { openMath } from './math.js';
 import { closePops, props, setTool } from './toolbar.js';
 import { codeFit, openCode } from './code.js';
 import { switchPage } from './notebooks.js';
+import { segInRect } from './geom.js';
 
 const w2 = (px, py) => {
   const v = P().v;
@@ -56,6 +57,22 @@ function hit(x0, y0) {
     }
   }
   return null;
+}
+// Selection box rule: an object is picked as soon as the box touches it, it does not have to be enclosed.
+// Lines and pen strokes are tested along their path, so a box in the empty corner of a diagonal line misses it.
+function touches(e, x1, y1, x2, y2) {
+  let q = null;
+  if (e.t === 'wire') q = wpts(e);
+  else if (e.t === 'curve') q = cpts(e);
+  else if (e.t === 'line' || e.t === 'arrow') q = [[e.x, e.y], [e.x + e.w, e.y + e.h]];
+  else if (e.t === 'free') q = e.pts.map(p => [e.x + p[0], e.y + p[1]]);
+  if (q) {
+    const m = (e.sw || 2) / 2 + 1;
+    if (q.length === 1) q = [q[0], q[0]];
+    return q.some((p, i) => i && segInRect(q[i - 1][0], q[i - 1][1], p[0], p[1], x1 - m, y1 - m, x2 + m, y2 + m));
+  }
+  const b = bb(e);
+  return b.x <= x2 && b.x + b.w >= x1 && b.y <= y2 && b.y + b.h >= y1;
 }
 function ax(vs, ts, t) {
   let b = null;
@@ -645,10 +662,7 @@ const up = ev => {
       y1 = Math.min(a.y, a.y2),
       x2 = Math.max(a.x, a.x2),
       y2 = Math.max(a.y, a.y2),
-      ids = Math.hypot(a.x2 - a.x, a.y2 - a.y) < 4 ? [] : P().els.filter(e => {
-        const b = bb(e);
-        return b.x >= x1 && b.y >= y1 && b.x + b.w <= x2 && b.y + b.h <= y2;
-      }).map(e => e.id);
+      ids = Math.hypot(a.x2 - a.x, a.y2 - a.y) < 4 ? [] : P().els.filter(e => touches(e, x1, y1, x2, y2)).map(e => e.id);
     selIds(ids);
     draw();
     props();
@@ -665,7 +679,8 @@ const up = ev => {
     draw();
     return;
   }
-  ST.sel = e.id;
+  // finished pen and highlighter strokes are not selected (no box in the way of the next stroke); the Select tool picks them later
+  ST.sel = e.t === 'free' ? null : e.id;
   commit();
   if (!['free', 'hl', 'wire'].includes(ST.tool)) setTool('select');
   props();

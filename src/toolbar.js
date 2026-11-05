@@ -29,7 +29,9 @@ const KEEP_RATIO = ['img', 'math'];
 const BAR = [['select', 'pointer', 'Select (V)'], ['free', 'pencil', 'Pen (P)'], ['hl', 'highlight', 'Highlighter (I)'], ['shapes'], ['text', 'typography', 'Text (T)'], ['code', 'code', 'Code block (K)'], ['more']];
 // Each drawing tool keeps its own editable colors and sizes, like Notability's per-tool favorites.
 const DEF_TB = () => ({
+  v: 2, // bump to apply new defaults (like the pinned tools) once to preferences saved by older versions
   hidden: [],
+  pins: ['eraser', 'hand', 'math', 'img', 'table'], // tools shown on the bar instead of in the popup menus
   g: {
     pen: { cols: SC.slice(), sizes: [1, 2, 4], c: 'auto', w: 2 },
     hl: { cols: ['#ffd43b', '#69db7c', '#74c0fc', '#f783ac', '#ffa94d'], sizes: [12, 20, 30], c: '#ffd43b', w: 20 },
@@ -38,9 +40,10 @@ const DEF_TB = () => ({
   }
 });
 let TB = DEF_TB();
+const ALLT = SHAPES.concat(MORE, CIRC);
 try {
   const t = JSON.parse(localStorage.getItem('sketchbooks-toolbar'));
-  if (t && t.g) TB = { hidden: t.hidden || [], g: Object.assign(DEF_TB().g, t.g) };
+  if (t && t.g) TB = { v: 2, hidden: t.hidden || [], pins: (t.v >= 2 && t.pins ? t.pins : DEF_TB().pins).filter(k => ALLT.some(x => x[0] === k)), g: Object.assign(DEF_TB().g, t.g) };
 } catch (e) {}
 const saveTB = () => {
   try {
@@ -91,29 +94,42 @@ function optionsRow() {
   h += '<span class="sep"></span>' + (ed ? ib('refresh', 'Reset colors and sizes', 'data-tbr="1"') + ib('check', 'Done customizing', 'data-tbe="1"', true) : ib('palette', 'Customize this bar', 'data-tbe="1"'));
   return h + '</div>';
 }
+// Tools from the Shapes and More menus that are not pinned to the bar; pinned ones leave the menu.
+const menuItems = g => (g === 'shapes' ? SHAPES : MORE.concat(P().circ ? CIRC : [])).filter(x => ST.tbEdit || !TB.pins.includes(x[0]));
 function renderTools() {
   const t = ST.tool, circ = P().circ, ed = ST.tbEdit;
   const shape = SHAPES.find(x => x[0] === ST.shape) || SHAPES[0];
-  const isShape = SHAPES.some(x => x[0] === t);
-  const isMore = MORE.some(x => x[0] === t) || t === 'wire' || t === 'comp';
-  const tools = BAR.map(([k, icon, label]) => {
-    if (k === 'more') return ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore);
+  const isShape = SHAPES.some(x => x[0] === t) && !TB.pins.includes(t);
+  const isMore = (MORE.some(x => x[0] === t) || t === 'wire' || t === 'comp') && !TB.pins.includes(t);
+  const parts = BAR.map(([k, icon, label]) => {
+    if (k === 'more') return menuItems('more').length ? ib('dots', circ ? 'More tools and circuits' : 'More tools', 'data-g="more" aria-haspopup="true"', isMore) : '';
     const off = TB.hidden.includes(k);
     if (off && !ed) return '';
-    const btn = k === 'shapes' ? ib(shape[1], 'Shapes: ' + shape[2], (ed ? 'data-hide="shapes"' : 'data-g="shapes" aria-haspopup="true"'), isShape && !ed) :
-      ib(icon, label, ed && k !== 'select' ? `data-hide="${k}" aria-pressed="${!off}"` : `data-t="${k}" aria-pressed="${t === k}"`, t === k && !ed);
+    if (k === 'shapes') {
+      if (!ed && !menuItems('shapes').length) return '';
+      return ib(shape[1], 'Shapes: ' + shape[2], 'data-g="shapes" aria-haspopup="true"', isShape && !ed).replace('class="ib', off ? 'class="ib hid' : 'class="ib');
+    }
+    const btn = ib(icon, label, ed && k !== 'select' ? `data-hide="${k}" aria-pressed="${!off}"` : `data-t="${k}" aria-pressed="${t === k}"`, t === k && !ed);
     return off ? btn.replace('class="ib', 'class="ib hid') : btn;
+  });
+  // pinned tools sit just before the "more" button; while customizing, tapping one sends it back to its menu
+  const pinned = TB.pins.map(k => ALLT.find(x => x[0] === k)).filter(x => x && (circ || !CIRC.includes(x))).map(x => {
+    const on = t === x[0] || (x[0] === 'cpal' && t === 'comp');
+    return ib(x[1], x[2], ed ? `data-pin="${x[0]}" aria-pressed="true"` : `data-t="${x[0]}" aria-pressed="${on}"`, on && !ed);
   }).join('');
-  $('#tools').innerHTML = optionsRow() + '<div class="trow">' + tools + '</div>' + (ed ? '<div class="trow hint">Tap a color or size to change it · tap a tool to show or hide it</div>' : '');
+  parts.splice(parts.length - 1, 0, pinned);
+  $('#tools').innerHTML = optionsRow() + '<div class="trow">' + parts.join('') + '</div>' + (ed ? '<div class="trow hint">Tap a color or size to change it · tap a tool to show or hide it · open Shapes or ⋯ to pin more tools here</div>' : '');
 }
-function openPop(g) {
+function openPop(g, keep) {
   const pop = $('#toolpop');
-  const list = g === 'shapes' ? SHAPES : MORE.concat(P().circ ? CIRC : []);
   const was = pop.dataset.g === g && !pop.hidden;
   closePops();
-  if (was) return;
+  if (was && !keep) return;
   pop.dataset.g = g;
-  pop.innerHTML = list.map(x => ib(x[1], x[2], 'data-t="' + x[0] + '"', x[0] === ST.tool || (x[0] === 'cpal' && ST.tool === 'comp'))).join('');
+  const ed = ST.tbEdit;
+  // customizing: tapping a tool pins it to the bar (or unpins it); normally it just picks the tool
+  pop.innerHTML = menuItems(g).map(x => ib(x[1], x[2], ed ? `data-pin="${x[0]}" aria-pressed="${TB.pins.includes(x[0])}"` : 'data-t="' + x[0] + '"', ed ? TB.pins.includes(x[0]) : x[0] === ST.tool || (x[0] === 'cpal' && ST.tool === 'comp'))).join('') +
+    (ed ? '<small class="hint">Tap a tool to pin it to the bar · tap it again to put it back</small>' + (g === 'shapes' ? `<button class="b" data-hide="shapes">${TB.hidden.includes('shapes') ? 'Show' : 'Hide'} the Shapes button</button>` : '') : '');
   pop.style.bottom = $('#main').getBoundingClientRect().bottom - $('#tools').getBoundingClientRect().top + 10 + 'px';
   pop.hidden = false;
 }
@@ -134,6 +150,7 @@ function toolClick(e) {
   const d = b.dataset, G = TB.g[grp(ST.tool)];
   if (d.tbe) {
     ST.tbEdit = !ST.tbEdit;
+    closePops();
     return renderTools();
   }
   if (d.tbr) {
@@ -142,10 +159,15 @@ function toolClick(e) {
     saveTB();
     return setTool(ST.tool);
   }
-  if (d.hide) {
-    TB.hidden = TB.hidden.includes(d.hide) ? TB.hidden.filter(x => x !== d.hide) : [...TB.hidden, d.hide];
+  if (d.hide || d.pin) {
+    const k = d.hide || d.pin, list = d.hide ? 'hidden' : 'pins';
+    TB[list] = TB[list].includes(k) ? TB[list].filter(x => x !== k) : [...TB[list], k];
     saveTB();
-    return renderTools();
+    renderTools();
+    // keep the open menu on screen so several tools can be pinned in a row
+    const pop = $('#toolpop');
+    if (!pop.hidden) openPop(pop.dataset.g, true);
+    return;
   }
   if (d.sd) {
     ST.sides = Math.max(3, Math.min(12, ST.sides + +d.sd));

@@ -90,6 +90,8 @@ input.ptitle{border:1px solid var(--acc);background:var(--panel);outline:0;width
 #pgpop small.mhint{display:block;margin:10px 8px 4px;line-height:1.4}
 #ctx .nf{height:40px}#ctx .nf input{width:44px}
 .wd{width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;flex:none}.wd i{background:currentColor;border-radius:50%;display:block}.wd:not(.on){color:var(--mut)}
+#toolpop .hint{flex-basis:100%;text-align:center;font-size:12px;color:var(--mut);padding:2px 8px}
+#toolpop .b{height:40px;padding:0 14px;border:1px solid var(--line);margin:2px auto 4px}
 #toolpop{bottom:calc(124px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);max-width:calc(100% - 16px);flex-wrap:wrap;justify-content:center;z-index:6}
 #ctx{z-index:5;max-width:calc(100% - 16px);overflow-x:auto}
 #ctx .sw,#panel .sw{margin:0 2px}
@@ -115,8 +117,10 @@ input.ptitle{border:1px solid var(--acc);background:var(--panel);outline:0;width
 
 /* ---------- properties panel ---------- */
 #panel{position:absolute;z-index:7;background:var(--panel);border:1px solid var(--line);box-shadow:var(--sh2);overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
-@media(min-width:900px){#panel{top:72px;right:12px;bottom:140px;width:280px;border-radius:16px}}
-@media(max-width:899px){#panel{left:8px;right:8px;bottom:calc(132px + env(safe-area-inset-bottom,0px));max-height:48%;border-radius:18px}}
+/* one fixed width on every screen, anchored to the right; only a very narrow screen shrinks it */
+#panel{width:min(320px,calc(100% - 16px));right:12px;border-radius:16px;box-sizing:border-box}
+@media(min-width:900px){#panel{top:72px;bottom:140px}}
+@media(max-width:899px){#panel{bottom:calc(132px + env(safe-area-inset-bottom,0px));max-height:min(52%,calc(100% - 200px));right:8px}}
 #panel .ph{display:flex;justify-content:space-between;align-items:center}
 #panel .pt{font:600 12px Figtree,sans-serif;color:var(--mut);letter-spacing:.04em;text-transform:uppercase;margin-top:8px}
 #panel .pr{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
