@@ -16,6 +16,8 @@ import './math.js';
 import './toolbar.js';
 import './sidebar.js';
 import './a11y.js';
+import './versions.js';
+import './palette.js';
 import { P, ST } from './state.js';
 import { cloudInit } from './cloud.js';
 import { CC, FF, resize } from './env.js';

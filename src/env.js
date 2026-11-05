@@ -2,6 +2,7 @@ import { P, ST } from './state.js';
 import { $, cv } from './util.js';
 import { draw, tfit } from './render.js';
 import { report } from './report.js';
+import { codeFit } from './code.js';
 
 export function resize() {
   const r = $('#main').getBoundingClientRect(),
@@ -107,7 +108,7 @@ export function needX() {
   l.rel = 'stylesheet';
   l.href = 'https://fonts.googleapis.com/css2?family=Lora:wght@500&family=JetBrains+Mono:wght@500&family=Permanent+Marker&display=swap';
   l.onload = () => setTimeout(() => {
-    P().els.forEach(e => e.t === 'text' && tfit(e));
+    P().els.forEach(e => e.t === 'text' ? tfit(e) : e.t === 'code' && codeFit(e));
     draw();
   }, 300);
   document.head.appendChild(l);

@@ -1,7 +1,7 @@
 import { P, ST } from './state.js';
 import { $, uid } from './util.js';
 import { css } from './env.js';
-import { cl, commit } from './render.js';
+import { OX, cl, commit } from './render.js';
 import { snp } from './input.js';
 import { selIds } from './edit.js';
 import { props, setTool } from './toolbar.js';
@@ -184,7 +184,7 @@ export function openLabel(e) {
     i = document.createElement('input');
   i.value = e.lbl || '';
   i.placeholder = 'R1 10kΩ';
-  i.style.cssText = `position:absolute;left:${(e.x + e.w / 2) * v.z + v.x - 60}px;top:${e.y * v.z + v.y - 36}px;width:120px;text-align:center;font:600 14px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:1px solid var(--acc);border-radius:6px;padding:3px;z-index:6`;
+  i.style.cssText = `position:absolute;left:${(e.x + e.w / 2) * v.z + v.x + OX() * v.z - 60}px;top:${e.y * v.z + v.y - 36}px;width:120px;text-align:center;font:600 14px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:1px solid var(--acc);border-radius:6px;padding:3px;z-index:6`;
   $('#main').appendChild(i);
   ST.ed = i;
   setTimeout(() => {

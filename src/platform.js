@@ -37,10 +37,9 @@ try {
 /* local storage for books and audio */
 const IDB = new Promise((ok, no) => {
   try {
-    const r = indexedDB.open('sketchbooks-db', 1);
+    const r = indexedDB.open('sketchbooks-db', 2);
     r.onupgradeneeded = () => {
-      r.result.createObjectStore('books');
-      r.result.createObjectStore('audio');
+      for (const n of ['books', 'audio', 'versions']) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n);
     };
     r.onsuccess = () => ok(r.result);
     r.onerror = () => no(r.error);

@@ -1,6 +1,6 @@
 import { P, ST } from './state.js';
 import { $, uid } from './util.js';
-import { bb, commit } from './render.js';
+import { OX, bb, commit } from './render.js';
 import { snp } from './input.js';
 import { cur, selIds, union } from './edit.js';
 import { props } from './toolbar.js';
@@ -34,7 +34,7 @@ export function linkEd() {
     i = document.createElement('input');
   i.value = c[0].href || '';
   i.placeholder = 'https://… (empty = remove link)';
-  i.style.cssText = `position:absolute;left:${Math.max(8, U.x * v.z + v.x)}px;top:${Math.max(60, U.y * v.z + v.y - 40)}px;width:260px;font:14px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:1px solid var(--acc);border-radius:6px;padding:5px 8px;z-index:6`;
+  i.style.cssText = `position:absolute;left:${Math.max(8, U.x * v.z + v.x + OX() * v.z)}px;top:${Math.max(60, U.y * v.z + v.y - 40)}px;width:260px;font:14px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:1px solid var(--acc);border-radius:6px;padding:5px 8px;z-index:6`;
   $('#main').appendChild(i);
   ST.ed = i;
   setTimeout(() => i.focus(), 0);
@@ -125,7 +125,7 @@ export function openCell(e, i, j) {
     rh = e.h / e.nr,
     inp = document.createElement('input');
   inp.value = e.cells[i] && e.cells[i][j] || '';
-  inp.style.cssText = `position:absolute;left:${(e.x + j * cw) * v.z + v.x}px;top:${(e.y + i * rh) * v.z + v.y}px;width:${cw * v.z}px;height:${rh * v.z}px;font:600 ${Math.max(10, Math.min(18, rh * .5)) * v.z}px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:2px solid var(--acc);padding:0 6px;z-index:6;box-sizing:border-box`;
+  inp.style.cssText = `position:absolute;left:${(e.x + j * cw) * v.z + v.x + OX() * v.z}px;top:${(e.y + i * rh) * v.z + v.y}px;width:${cw * v.z}px;height:${rh * v.z}px;font:600 ${Math.max(10, Math.min(18, rh * .5)) * v.z}px Figtree,sans-serif;background:var(--panel);color:var(--ink);border:2px solid var(--acc);padding:0 6px;z-index:6;box-sizing:border-box`;
   $('#main').appendChild(inp);
   ST.ed = inp;
   setTimeout(() => {

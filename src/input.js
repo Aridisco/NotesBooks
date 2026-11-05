@@ -2,16 +2,18 @@ import { P, ST } from './state.js';
 import { $, cv, esc, uid } from './util.js';
 import { save } from './cloud.js';
 import { FF, G, col, needX, rot } from './env.js';
-import { A4H, A4W, bb, cl, commit, cpts, draw, hdl, tfit } from './render.js';
+import { A4H, A4W, GAP, OX, bb, cl, commit, cpts, draw, hdl, spreadOf, tfit } from './render.js';
 import { cur, selIds, union } from './edit.js';
 import { compPlace, openLabel, wpts } from './circuit.js';
 import { TCOL, THL, badgePos, linkOf, openCell, openLink, tablePlace } from './objects.js';
 import { openMath } from './math.js';
-import { props, setTool } from './toolbar.js';
+import { closePops, props, setTool } from './toolbar.js';
+import { openCode } from './code.js';
+import { switchPage } from './notebooks.js';
 
 const w2 = (px, py) => {
   const v = P().v;
-  return [(px - v.x) / v.z, (py - v.y) / v.z];
+  return [(px - v.x) / v.z - OX(), (py - v.y) / v.z];
 };
 function dseg(px, py, x1, y1, x2, y2) {
   const l = (x2 - x1) ** 2 + (y2 - y1) ** 2;
@@ -42,7 +44,7 @@ function hit(x0, y0) {
       if (dseg(x, y, e.x, e.y, e.x + e.w, e.y + e.h) < tol) return e;
     } else if (e.t === 'free') {
       for (let j = 0; j < e.pts.length; j++) if (Math.hypot(x - e.x - e.pts[j][0], y - e.y - e.pts[j][1]) < tol + e.sw) return e;
-    } else if (e.t === 'text' || e.t === 'math' || e.t === 'img' || e.t === 'comp' || e.t === 'table' || e.fill !== 'none') {
+    } else if (e.t === 'text' || e.t === 'code' || e.t === 'math' || e.t === 'img' || e.t === 'comp' || e.t === 'table' || e.fill !== 'none') {
       if (x >= b.x - tol && x <= b.x + b.w + tol && y >= b.y - tol && y <= b.y + b.h + tol) return e;
     } else {
       const inside = x >= b.x - tol && x <= b.x + b.w + tol && y >= b.y - tol && y <= b.y + b.h + tol,
@@ -115,13 +117,14 @@ function openText(x, y, e0) {
     man = !!(e0 && e0.bw),
     aw = 0;
   t.value = e0 ? e0.text : '';
-  t.style.cssText = `left:${x * v.z + v.x}px;top:${y * v.z + v.y}px;font-size:${fs * v.z}px;line-height:1.2;font-family:${FF[ff]};color:${col(e0 ? e0.stroke : ST.stroke)};resize:both;overflow:hidden;white-space:${man ? 'pre-wrap' : 'pre'};min-width:40px;min-height:${fs * v.z * 1.2 + 4}px`;
+  t.style.cssText = `left:${x * v.z + v.x + OX() * v.z}px;top:${y * v.z + v.y}px;font-size:${fs * v.z}px;line-height:1.2;font-family:${FF[ff]};color:${col(e0 ? e0.stroke : ST.stroke)};resize:both;overflow:hidden;white-space:${man ? 'pre-wrap' : 'pre'};min-width:40px;min-height:${fs * v.z * 1.2 + 4}px`;
   if (man) t.style.width = e0.bw * v.z + 'px';
   $('#main').appendChild(t);
   ST.ed = t;
   const bar = document.createElement('div');
   bar.id = 'tcol';
   bar.innerHTML = TCOL.map(c => `<button class="sw" data-c="${c}" style="background:${c}" title="Text color" aria-label="Text color ${c}"></button>`).join('') + '<span class="sep"></span>' + THL.map(c => `<button class="sw" data-h="${c}" style="background:${c}" title="Highlight" aria-label="Highlight ${c}"></button>`).join('') + '<button class="b" data-x="1">Clear</button><div id="tprev"></div>';
+  bar.hidden = true;
   bar.style.left = t.style.left;
   bar.style.top = Math.max(56, parseFloat(t.style.top) - 64) + 'px';
   $('#main').appendChild(bar);
@@ -247,6 +250,10 @@ function openText(x, y, e0) {
       props();
     }
   };
+  const syncBar = () => {
+    bar.hidden = t.selectionStart === t.selectionEnd;
+  };
+  ['select', 'keyup', 'pointerup', 'input', 'touchend'].forEach(n => t.addEventListener(n, syncBar));
   t.addEventListener('blur', done);
   t.addEventListener('keydown', k => {
     if (k.key === 'Escape') t.blur();
@@ -269,11 +276,23 @@ cv.addEventListener('pointerdown', ev => {
     ST.ed.blur();
     return;
   }
+  if (ev.pointerType === 'pen') ST.penSeen = true;
+  // Once a pen has been used, fingers only pan and zoom, and a resting palm never interrupts a stroke.
+  const fingerPan = ev.pointerType === 'touch' && ST.penSeen;
+  if (fingerPan && ST.act && ST.act.k === 'draw') return;
+  if (!(ST.space || ST.tool === 'hand' || fingerPan) && ptrs.size === 0) {
+    // In a two-page spread, pressing the other sheet makes it the active page.
+    const cp = P(), sp = spreadOf(cp);
+    if (sp) {
+      const want = (pos(ev)[0] - cp.v.x) / cp.v.z > A4W + GAP / 2 ? sp.R : sp.L;
+      if (want !== cp) switchPage(want.id);
+    }
+  }
   cv.setPointerCapture(ev.pointerId);
   const [px, py] = pos(ev),
     p = P();
   ptrs.set(ev.pointerId, [px, py]);
-  $('#pgpop').hidden = true;
+  closePops();
   if (ptrs.size === 2) {
     if (ST.act && ST.act.k === 'draw' && p.els[p.els.length - 1] === ST.act.e) p.els.pop();
     ST.act = null;
@@ -291,7 +310,7 @@ cv.addEventListener('pointerdown', ev => {
   }
   if (ptrs.size > 2) return;
   let [x, y] = w2(px, py);
-  if (ST.space || ev.button === 1 || ST.tool === 'hand') {
+  if (ST.space || ev.button === 1 || ST.tool === 'hand' || fingerPan) {
     ST.act = {
       k: 'pan',
       px,
@@ -389,6 +408,17 @@ cv.addEventListener('pointerdown', ev => {
       draw();
       openText(h.x, h.y, h);
     } else openText(...cl([x, y]));
+    setTool('select');
+    return;
+  }
+  if (ST.tool === 'code') {
+    const h = hit(x, y);
+    if (h && h.t === 'code') {
+      ST.sel = h.id;
+      h.hide = true;
+      draw();
+      openCode(h.x, h.y, h);
+    } else openCode(...cl([x, y]));
     setTool('select');
     return;
   }
@@ -620,6 +650,11 @@ cv.addEventListener('dblclick', ev => {
   } else if (h && h.t === 'table') {
     ST.sel = h.id;
     openCell(h, Math.min(h.nr - 1, Math.max(0, Math.floor((q[1] - h.y) / (h.h / h.nr)))), Math.min(h.nc - 1, Math.max(0, Math.floor((q[0] - h.x) / (h.w / h.nc)))));
+  } else if (h && h.t === 'code') {
+    ST.sel = h.id;
+    h.hide = true;
+    draw();
+    openCode(h.x, h.y, h);
   } else if (h && h.t === 'comp') {
     ST.sel = h.id;
     openLabel(h);

@@ -6,7 +6,7 @@ import { THC, VER, css, custom, inkFor } from './env.js';
 import { bb, describePage, draw, drawR, fitA4 } from './render.js';
 import { normUrl, openLink } from './objects.js';
 import { bkHTML, hostOf, openReader } from './reader.js';
-import { setTool } from './toolbar.js';
+import { props, setTool } from './toolbar.js';
 import { endRename, side } from './sidebar.js';
 
 ST.boot = true;
@@ -98,6 +98,20 @@ export function load() {
   render();
   draw();
   setTool(ST.tool);
+}
+// Make another page the active one without refitting the view (used when tapping the other sheet of a spread).
+export function switchPage(id) {
+  ST.S.cur = id;
+  ST.msel = [];
+  ST.sel = null;
+  ST.hist = [JSON.stringify(P().els)];
+  ST.hi = 0;
+  $('#pgname').textContent = P().name;
+  describePage();
+  save();
+  side();
+  props();
+  draw();
 }
 export function render() {
   ST.S.view = ST.S.view || 'shelf';

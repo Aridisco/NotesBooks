@@ -8,6 +8,9 @@ import { bkBmp } from './books.js';
 import { props } from './toolbar.js';
 import { side } from './sidebar.js';
 import { isValidBackup } from './backup.js';
+import { codeFit } from './code.js';
+import { buildPdf } from './pdf.js';
+import { toast } from './report.js';
 
 export function cur() {
   const ids = ST.msel.length ? ST.msel : ST.sel ? [ST.sel] : [];
@@ -184,8 +187,18 @@ addEventListener('paste', e => {
     pasteClip(JSON.parse(window._clip));
   }
 });
-$('#props').addEventListener('change', e => {
+$('#panel').addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'cls' || t.id === 'cln') {
+    const c = cur().filter(q => q.t === 'code');
+    if (t.id === 'cls') ST.clang = t.value;
+    c.forEach(q => {
+      if (t.id === 'cls') q.lang = t.value;else q.nums = t.checked;
+      codeFit(q);
+    });
+    if (c.length) commit();
+    props();
+  }
   if (t.id === 'ffs') {
     ST.tff = t.value;
     if (ST.tff !== 'hand' && ST.tff !== 'sans') needX();
@@ -220,14 +233,14 @@ const dl = (bl, name) => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(u), 2000);
 };
-function exportPNG() {
-  const p = P();
+// Draws a whole page (A4 sheet, or the bounding box of an infinite page) to an offscreen canvas.
+function pageCanvas(p, k = 2) {
   let a = 0,
     b = 0,
     w = A4W,
     h = A4H;
   if (p.mode !== 'a4') {
-    if (!p.els.length) return;
+    if (!p.els.length) return null;
     let x1 = 1e9,
       y1 = 1e9,
       x2 = -1e9,
@@ -244,8 +257,7 @@ function exportPNG() {
     w = x2 - x1 + 80;
     h = y2 - y1 + 80;
   }
-  const c = document.createElement('canvas'),
-    k = 2;
+  const c = document.createElement('canvas');
   c.width = w * k;
   c.height = h * k;
   const g = c.getContext('2d'),
@@ -263,7 +275,32 @@ function exportPNG() {
   p.els.forEach(drawR);
   ST.ctx = old;
   ST.INK = oi;
-  c.toBlob(bl => dl(bl, (p.name || 'page') + '.png'), 'image/png');
+  c.pt = p.mode === 'a4' ? [595.28, 841.89] : [w * .75, h * .75];
+  return c;
+}
+export function exportPNG() {
+  const p = P(),
+    c = pageCanvas(p);
+  if (c) c.toBlob(bl => dl(bl, (p.name || 'page') + '.png'), 'image/png');else toast('This page is empty.');
+}
+export async function exportPDF(pages, name) {
+  const out = [];
+  for (const p of pages) {
+    const c = pageCanvas(p);
+    if (!c) continue;
+    const bl = await new Promise(r => c.toBlob(r, 'image/jpeg', .92));
+    out.push({
+      jpg: new Uint8Array(await bl.arrayBuffer()),
+      pw: c.width,
+      ph: c.height,
+      wpt: c.pt[0],
+      hpt: c.pt[1]
+    });
+  }
+  if (!out.length) return toast('Nothing to export: the pages are empty.');
+  dl(new Blob([buildPdf(out)], {
+    type: 'application/pdf'
+  }), name + '.pdf');
 }
 $('#exp').onclick = exportPNG;
 $('#bak').onclick = () => dl(new Blob([JSON.stringify({

@@ -41,6 +41,11 @@ export const ST = {
   lt: undefined,
   boot: undefined,
   bkForm: undefined,
+  shape: undefined,
+  panel: undefined,
+  recent: undefined,
+  penSeen: undefined,
+  clang: undefined,
 };
 
 ST.S = null;
@@ -83,6 +88,7 @@ ST.space = false;
 ST.ren = null;
 ST.INK = '#000';
 ST.ed = null;
+ST.clang = 'js';
 export const P = () => {
   for (const n of ST.S.nbs) for (const p of n.pages) if (p.id === ST.S.cur) return p;
 };

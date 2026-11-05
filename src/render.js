@@ -6,6 +6,9 @@ import { imgSrc } from './edit.js';
 import { compDraw, wpts } from './circuit.js';
 import { badgePos, linkOf } from './objects.js';
 import { BKC, bkBmp } from './books.js';
+import { placeCtx } from './toolbar.js';
+import { drawCode } from './code.js';
+import { snapshotSoon } from './versions.js';
 
 export function cpts(e) {
   const x0 = e.x,
@@ -232,6 +235,10 @@ function drawEl(e) {
     if (im.complete && im.naturalWidth) ST.ctx.drawImage(im, e.x, e.y, e.w, e.h);
     return;
   }
+  if (e.t === 'code') {
+    drawCode(e);
+    return;
+  }
   if (e.t === 'text') {
     if (e.hide) return;
     ST.ctx.fillStyle = col(e.stroke);
@@ -380,22 +387,43 @@ export function hdl(e) {
 export const A4W = 794;
 export const A4H = 1123;
 export const cl = q => P().mode === 'a4' ? [Math.max(0, Math.min(A4W, q[0])), Math.max(0, Math.min(A4H, q[1]))] : q;
+// Two A4 pages side by side: a page with `spread` set is shown together with the next page of its notebook.
+export const GAP = 40;
+export function spreadOf(p) {
+  if (!p || p.mode !== 'a4') return null;
+  const nb = ST.S.nbs.find(n => n.pages.includes(p));
+  if (!nb) return null;
+  const i = nb.pages.indexOf(p), nx = nb.pages[i + 1], pv = nb.pages[i - 1];
+  let L = null, R = null;
+  if (p.spread && nx && nx.mode === 'a4') [L, R] = [p, nx];
+  else if (pv && pv.spread && pv.mode === 'a4') [L, R] = [pv, p];
+  if (!L) return null;
+  R.v = L.v; // one shared view, so both sheets pan and zoom together
+  return { L, R };
+}
+export const spreadW = p => spreadOf(p) ? A4W * 2 + GAP : A4W;
+// World-space x of the active page's origin (0 for single pages and left sheets).
+export const OX = () => {
+  const s = spreadOf(P());
+  return s && s.R === P() ? A4W + GAP : 0;
+};
 export function fitA4(p) {
   const W = cv.clientWidth,
     H = cv.clientHeight,
-    z = Math.max(.2, Math.min((W - 40) / A4W, (H - 110) / A4H, 1.5));
-  p.v = {
+    tw = spreadW(p),
+    z = Math.max(.2, Math.min((W - 40) / tw, (H - 110) / A4H, 1.5));
+  Object.assign(p.v, {
     z,
-    x: (W - A4W * z) / 2,
+    x: (W - tw * z) / 2,
     y: (H - A4H * z) / 2 + 24
-  };
+  });
 }
 function clampV(p) {
   const v = p.v,
     W = cv.clientWidth,
     H = cv.clientHeight,
     m = 70;
-  v.x = Math.max(m - A4W * v.z, Math.min(W - m, v.x));
+  v.x = Math.max(m - spreadW(p) * v.z, Math.min(W - m, v.x));
   v.y = Math.max(m - A4H * v.z, Math.min(H - m, v.y));
 }
 export function draw() {
@@ -419,79 +447,87 @@ function drawNow() {
   ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
   ST.ctx.fillStyle = a4 ? css('--line') : custom(p) ? p.bg : css('--bg');
   ST.ctx.fillRect(0, 0, cv.width, cv.height);
-  if (a4) {
-    ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * v.x, d * v.y);
-    ST.ctx.save();
-    if (!ST.LT) {
-      ST.ctx.shadowColor = 'rgba(0,0,0,.28)';
-      ST.ctx.shadowBlur = 20 * d;
-    }
-    ST.ctx.fillStyle = custom(p) ? p.bg : css('--panel');
-    ST.ctx.fillRect(0, 0, A4W, A4H);
-    ST.ctx.restore();
-    ST.ctx.save();
-    ST.ctx.beginPath();
-    ST.ctx.rect(0, 0, A4W, A4H);
-    ST.ctx.clip();
-    ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }
-  const g = 28 * v.z,
-    pat = p.pat || 'dots',
-    W = cv.width / d,
-    H = cv.height / d;
-  if (pat !== 'none' && g > 8) {
-    ST.ctx.save();
-    ST.ctx.globalAlpha = .2;
-    ST.ctx.fillStyle = ST.ctx.strokeStyle = ST.INK;
-    ST.ctx.lineWidth = d;
-    const ox = (v.x % g + g) % g,
-      oy = (v.y % g + g) % g;
-    if (pat === 'dots') {
+  const sp = a4 ? spreadOf(p) : null,
+    sheets = sp ? [[sp.L, 0], [sp.R, A4W + GAP]] : [[p, 0]];
+  const paper = (pg, offX) => {
+    const vx = v.x + offX * v.z;
+    if (a4) {
+      ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * vx, d * v.y);
+      ST.ctx.save();
+      if (!ST.LT) {
+        ST.ctx.shadowColor = 'rgba(0,0,0,.28)';
+        ST.ctx.shadowBlur = 20 * d;
+      }
+      ST.ctx.fillStyle = custom(pg) ? pg.bg : css('--panel');
+      ST.ctx.fillRect(0, 0, A4W, A4H);
+      ST.ctx.restore();
+      ST.ctx.save();
       ST.ctx.beginPath();
-      for (let x = ox; x < W; x += g) for (let y = oy; y < H; y += g) ST.ctx.rect((x - 1) * d, (y - 1) * d, 2 * d, 2 * d);
-      ST.ctx.fill();
-    } else {
-      ST.ctx.beginPath();
-      for (let y = oy; y < H; y += g) {
-        ST.ctx.moveTo(0, y * d);
-        ST.ctx.lineTo(W * d, y * d);
-      }
-      if (pat === 'squares') for (let x = ox; x < W; x += g) {
-        ST.ctx.moveTo(x * d, 0);
-        ST.ctx.lineTo(x * d, H * d);
-      }
-      ST.ctx.stroke();
+      ST.ctx.rect(0, 0, A4W, A4H);
+      ST.ctx.clip();
+      ST.ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
-    ST.ctx.restore();
-  }
-  ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * v.x, d * v.y);
-  if (p.bk) {
-    const bm = bkBmp(p);
-    if (bm) ST.ctx.drawImage(bm, 0, 0, A4W, A4W * bm.height / bm.width);else {
-      const c0 = BKC.get(p.bk.id + ':' + p.bk.i);
-      if (c0 && c0.miss) {
-        ST.ctx.save();
-        ST.ctx.fillStyle = ST.INK;
-        ST.ctx.globalAlpha = .5;
-        ST.ctx.font = '500 22px Figtree,sans-serif';
-        ST.ctx.textAlign = 'center';
-        ST.ctx.fillText('Book file is not on this device. Import the same PDF again.', A4W / 2, A4H / 2);
-        ST.ctx.restore();
+    const g = 28 * v.z,
+      pat = pg.pat || 'dots',
+      W = cv.width / d,
+      H = cv.height / d;
+    if (pat !== 'none' && g > 8) {
+      ST.ctx.save();
+      ST.ctx.globalAlpha = .2;
+      ST.ctx.fillStyle = ST.ctx.strokeStyle = ST.INK;
+      ST.ctx.lineWidth = d;
+      const ox = (vx % g + g) % g,
+        oy = (v.y % g + g) % g;
+      if (pat === 'dots') {
+        ST.ctx.beginPath();
+        for (let x = ox; x < W; x += g) for (let y = oy; y < H; y += g) ST.ctx.rect((x - 1) * d, (y - 1) * d, 2 * d, 2 * d);
+        ST.ctx.fill();
+      } else {
+        ST.ctx.beginPath();
+        for (let y = oy; y < H; y += g) {
+          ST.ctx.moveTo(0, y * d);
+          ST.ctx.lineTo(W * d, y * d);
+        }
+        if (pat === 'squares') for (let x = ox; x < W; x += g) {
+          ST.ctx.moveTo(x * d, 0);
+          ST.ctx.lineTo(x * d, H * d);
+        }
+        ST.ctx.stroke();
+      }
+      ST.ctx.restore();
+    }
+    ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * vx, d * v.y);
+    if (pg.bk) {
+      const bm = bkBmp(pg);
+      if (bm) ST.ctx.drawImage(bm, 0, 0, A4W, A4W * bm.height / bm.width);else {
+        const c0 = BKC.get(pg.bk.id + ':' + pg.bk.i);
+        if (c0 && c0.miss) {
+          ST.ctx.save();
+          ST.ctx.fillStyle = ST.INK;
+          ST.ctx.globalAlpha = .5;
+          ST.ctx.font = '500 22px Figtree,sans-serif';
+          ST.ctx.textAlign = 'center';
+          ST.ctx.fillText('Book file is not on this device. Import the same PDF again.', A4W / 2, A4H / 2);
+          ST.ctx.restore();
+        }
       }
     }
-  }
-  const vx0 = -v.x / v.z - 40,
-    vy0 = -v.y / v.z - 40,
-    vx1 = vx0 + cv.clientWidth / v.z + 80,
-    vy1 = vy0 + cv.clientHeight / v.z + 80;
-  p.els.forEach(e => {
-    if (!e.r && e.t !== 'text') {
-      const b = bb(e);
-      if (b.x > vx1 || b.y > vy1 || b.x + b.w < vx0 || b.y + b.h < vy0) return;
-    }
-    drawR(e);
-  });
-  if (a4) ST.ctx.restore();
+    const vx0 = -vx / v.z - 40,
+      vy0 = -v.y / v.z - 40,
+      vx1 = vx0 + cv.clientWidth / v.z + 80,
+      vy1 = vy0 + cv.clientHeight / v.z + 80;
+    pg.els.forEach(e => {
+      if (!e.r && e.t !== 'text') {
+        const b = bb(e);
+        if (b.x > vx1 || b.y > vy1 || b.x + b.w < vx0 || b.y + b.h < vy0) return;
+      }
+      drawR(e);
+    });
+    if (a4) ST.ctx.restore();
+  };
+  sheets.forEach(([pg, o]) => paper(pg, o));
+  // selection, links and handles belong to the active page, so draw them in its coordinate space
+  ST.ctx.setTransform(d * v.z, 0, 0, d * v.z, d * (v.x + (sp && sp.R === p ? A4W + GAP : 0) * v.z), d * v.y);
   const aco = css('--acc');
   p.els.forEach(e => {
     if (!linkOf(e)) return;
@@ -581,6 +617,7 @@ function drawNow() {
     ST.ctx.restore();
   }
   $('#zoomv') && ($('#zoomv').textContent = Math.round(v.z * 100) + '%');
+  placeCtx();
 }
 // Text alternative for the canvas, read by screen readers through #cvdesc.
 export function describePage() {
@@ -603,6 +640,7 @@ export function commit() {
   ST.hi = ST.hist.length - 1;
   VER.set(p, (VER.get(p) || 0) + 1);
   describePage();
+  snapshotSoon();
   save();
   draw();
 }

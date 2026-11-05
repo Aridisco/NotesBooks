@@ -3,6 +3,7 @@ import { $, esc, uid } from './util.js';
 import { chunks, planBatches, syncAction } from './syncLogic.js';
 import { report } from './report.js';
 import { askChoice } from './dialog.js';
+import { I } from './icons.js';
 import { FB_CONFIG } from './config.js';
 import { THC, lsw } from './env.js';
 import { draw } from './render.js';
@@ -33,6 +34,7 @@ const metaOf = ts => ({
       bg: p.bg,
       pat: p.pat,
       mode: p.mode,
+      spread: p.spread,
       circ: p.circ,
       bk: p.bk
     }))
@@ -273,7 +275,7 @@ $('#svnow').onclick = () => doSave();
 $('#svx').onclick = () => {
   $('#svbar').hidden = true;
 };
-export const saveBtn = () => '<button class="wb ' + (unsaved() ? 'on' : '') + '" data-a="save" title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">💾</button>';
+export const saveBtn = () => '<button class="ib' + (unsaved() ? ' on' : '') + '" data-a="save" title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">' + I.deviceFloppy + '</button>';
 let fbAuth = null;
 let fbUnsub = null;
 export async function cloudInit() {
