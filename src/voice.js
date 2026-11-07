@@ -54,11 +54,13 @@ function vStart() {
           ts: Date.now(),
           text,
           blob
-        }, id)).then(listRecs).catch(() => {
+        }, id)).then(listRecs).catch(e => {
+          report(e, 'Recording could not be saved', { quiet: true });
           $('#vtxt').textContent += '\n(Could not save the audio on this device)';
         });
       }, 700);
     };
+    mr.onerror = e => report(e.error, 'Audio recording failed', { quiet: true });
     mr.start(5000);
     if (SR) {
       rec = new SR();
@@ -77,14 +79,16 @@ function vStart() {
       rec.onend = () => {
         if (recOn) try {
           rec.start();
-        } catch (e) {}
+        } catch (e) { report(e, 'Speech recognition could not restart', { quiet: true }); }
       };
+      rec.onerror = e => report(new Error(e.message || e.error), 'Speech recognition failed', { quiet: true });
       try {
         rec.start();
-      } catch (e) {}
+      } catch (e) { report(e, 'Speech recognition could not start', { quiet: true }); }
     }
     props();
-  }).catch(() => {
+  }).catch(e => {
+    report(e, 'Voice recording could not start', { quiet: true });
     $('#vtxt').textContent = 'Microphone access was denied.';
   });
 }
@@ -92,10 +96,10 @@ function vStop() {
   recOn = false;
   try {
     rec && rec.stop();
-  } catch (e) {}
+  } catch (e) { report(e, 'Speech recognition could not stop', { quiet: true }); }
   try {
     mr && mr.state !== 'inactive' && mr.stop();
-  } catch (e) {}
+  } catch (e) { report(e, 'Audio recording could not stop', { quiet: true }); }
   $('#vgo').textContent = '● Record';
   $('#vgo').classList.remove('on');
   props();
@@ -147,5 +151,5 @@ $('#vlist').onclick = e => {
     const r = m.find(x => x.id === b.dataset.rt);
     if (r) vInsert(r.text);
   }
-  if (b.dataset.rd) idbp('audio', 'readwrite', s => s.delete(b.dataset.rd)).then(listRecs);
+  if (b.dataset.rd) idbp('audio', 'readwrite', s => s.delete(b.dataset.rd)).then(listRecs).catch(e => report(e, 'Recording could not be deleted', { quiet: true }));
 };

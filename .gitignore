@@ -3,3 +3,5 @@ dist
 .env
 .env.local
 .DS_Store
+.firebase/
+bug report/audit-ui-ux/shots/

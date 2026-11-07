@@ -1,9 +1,9 @@
 import { ST, P } from './state.js';
-import { $, esc, uid } from './util.js';
-import { report } from './report.js';
+import { $, cname, esc, uid } from './util.js';
+import { report, toast } from './report.js';
 import { save } from './cloud.js';
 import { THC, VER, css, custom, inkFor } from './env.js';
-import { bb, describePage, draw, drawR, fitA4 } from './render.js';
+import { bb, describePage, draw, drawR, fitA4, openHist } from './render.js';
 import { normUrl, openLink } from './objects.js';
 import { bkHTML, hostOf, openReader } from './reader.js';
 import { pgpop, props, setTool } from './toolbar.js';
@@ -87,8 +87,7 @@ export function load() {
   ST.msel = [];
   if (!P().circ && (ST.tool === 'comp' || ST.tool === 'wire')) ST.tool = 'select';
   if (P().mode === 'a4') fitA4(P());
-  ST.hist = [JSON.stringify(P().els)];
-  ST.hi = 0;
+  openHist();
   ST.sel = null;
   describePage();
   if (!ST.boot) {
@@ -104,16 +103,26 @@ export function switchPage(id) {
   ST.S.cur = id;
   ST.msel = [];
   ST.sel = null;
-  ST.hist = [JSON.stringify(P().els)];
-  ST.hi = 0;
+  openHist();
   describePage();
   save();
   props();
   draw();
 }
+let lastView = '';
+// Plays a short entrance on the screen that just became visible (library, notebook, bin or editor).
+function enter(el) {
+  el.classList.remove('enter');
+  void el.offsetWidth;
+  el.classList.add('enter');
+}
 export function render() {
   ST.S.view = ST.S.view || 'shelf';
+  if (ST.S.view !== lastView && lastView) enter(ST.S.view === 'page' ? $('#main') : $('#home'));
+  lastView = ST.S.view;
   $('#home').hidden = ST.S.view === 'page';
+  // Editor controls stay mounted under the library: keep them out of Tab order and assistive tech.
+  for (const id of ['tools', 'topr', 'ctx', 'panel']) $('#' + id).inert = ST.S.view !== 'page';
   if (ST.S.view !== 'page') home();else props();
   save();
 }
@@ -159,16 +168,17 @@ function thumb(p, c) {
     });
   }
 }
-// Search results across every notebook: page names, notebook names, text and formulas.
+// Search results across every notebook: page names, notebook names, text, formulas, code and table cells.
 function results(q) {
   const R = [];
   ST.S.nbs.forEach(n => n.pages.forEach(p => {
     let sn = null;
     const nm = (n.name + ' ' + p.name).toLowerCase().includes(q);
     for (const e of p.els) {
-      const t = e.t === 'text' ? e.text : e.t === 'math' ? e.tex : '';
-      if (t && t.toLowerCase().includes(q)) {
-        sn = t;
+      const t = e.t === 'text' || e.t === 'code' ? e.text : e.t === 'math' ? e.tex : e.t === 'table' ? (e.cells || []).flat().filter(Boolean).join(' · ') : '';
+      const at = t ? t.toLowerCase().indexOf(q) : -1;
+      if (at >= 0) {
+        sn = t.slice(Math.max(0, at - 20)).replace(/\s+/g, ' ');
         break;
       }
     }
@@ -202,7 +212,7 @@ export function home() {
   h.innerHTML = '<header class="lhd"><div class="lrow">' + backBtn('Notebooks') + '<span class="grow"></span>' +
     ICB('books', 'Add book (PDF)', 'data-a="bkadd"') + ICB('link', 'Add book (link)', 'data-a="bklink"', 'ib' + (ST.bkForm ? ' on' : '')) +
     (ST.S.nbs.length > 1 ? (cfm ? '<button class="pill danger" data-a="dn">Tap again to delete</button>' : ICB('trash', 'Delete notebook', 'data-a="dn"', 'ib danger')) : '') + '</div>' +
-    `<input class="lt" data-bn value="${esc(n.name)}" aria-label="Notebook name"><div class="covers" role="group" aria-label="Cover color">${COV.map(c => `<button class="sw${cc(n, idx) === c ? ' on' : ''}" data-a="c" data-id="${c}" aria-label="Cover color ${c}" aria-pressed="${cc(n, idx) === c}" style="background:${c}"></button>`).join('')}</div></header>` +
+    `<input class="lt" data-bn value="${esc(n.name)}" aria-label="Notebook name"><div class="covers" role="group" aria-label="Cover color">${COV.map(c => `<button class="sw${cc(n, idx) === c ? ' on' : ''}" data-a="c" data-id="${c}" aria-label="Cover color ${cname(c)}" aria-pressed="${cc(n, idx) === c}" style="background:${c}"></button>`).join('')}</div></header>` +
     bkHTML(n) + '<div class="grid">' + n.pages.map(p => `<div class="card" role="button" tabindex="0" data-a="op" data-id="${p.id}" aria-label="Open ${esc(p.name)}"><canvas width="320" height="210" data-th="${p.id}"></canvas><div class="cn">${ST.ren === p.id ? `<input data-r="${p.id}" value="${esc(p.name)}" aria-label="Page name">` : `<span class="nm" data-rn="${p.id}">${esc(p.name)}</span>`}` +
     ICB('pencil', 'Rename page', `data-a="ren" data-id="${p.id}"`, 'ib sm') + ICB('copy', 'Duplicate page', `data-a="dpg" data-id="${p.id}"`, 'ib sm') + (n.pages.length > 1 ? ICB('trash', 'Delete page', `data-a="dp" data-id="${p.id}"`, 'ib sm') : '') + '</div></div>').join('') +
     `<div class="card new" role="button" tabindex="0" data-a="np">${I.filePlus}<span>New page</span></div></div>`;
@@ -256,7 +266,7 @@ $('#home').onclick = e => {
     const t = $('#home').querySelector('#bkt').value.trim(),
       u = normUrl($('#home').querySelector('#bku').value);
     if (!u || u.startsWith('mailto:')) {
-      alert('Enter a valid web address, for example https://…');
+      toast('Enter a valid web address, for example https://…');
       return;
     }
     n.books = n.books || [];
@@ -294,6 +304,7 @@ $('#home').onclick = e => {
     } else {
       cfm = false;
       binNb(n.id);
+      toast('“' + n.name + '” moved to the Bin. Restore it from the Bin for 30 days.');
       ST.S.nbs = ST.S.nbs.filter(x => x !== n);
       ST.S.view = 'shelf';
       if (!P()) ST.S.cur = ST.S.nbs[0].pages[0].id;
@@ -325,6 +336,7 @@ $('#home').onclick = e => {
     }
   } else if (a === 'dp') {
     binPg(n, id);
+    toast('Page moved to the Bin. Restore it from the Bin for 30 days.');
     n.pages = n.pages.filter(p => p.id !== id);
     if (!P()) ST.S.cur = n.pages[0].id;
   }

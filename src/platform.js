@@ -1,13 +1,17 @@
 import { ST } from './state.js';
 import { resize } from './env.js';
+import { report } from './report.js';
 
 /* full screen */
 export function toggleFS() {
   const d = document,
     el = d.documentElement;
   try {
-    if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
-  } catch (e) {}
+    const result = d.fullscreenElement || d.webkitFullscreenElement
+      ? (d.exitFullscreen || d.webkitExitFullscreen).call(d)
+      : (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    result?.catch(e => report(e, 'Fullscreen could not change', { quiet: true }));
+  } catch (e) { report(e, 'Fullscreen could not change', { quiet: true }); }
 }
 ['fullscreenchange', 'webkitfullscreenchange'].forEach(n => document.addEventListener(n, () => {
   setTimeout(resize, 80);
@@ -25,8 +29,8 @@ try {
     u();
     b.addEventListener('levelchange', u);
     b.addEventListener('chargingchange', u);
-  });
-} catch (e) {}
+  }).catch(e => report(e, 'Battery status unavailable', { quiet: true }));
+} catch (e) { report(e, 'Battery status unavailable', { quiet: true }); }
 /* local storage for books and audio */
 const IDB = new Promise((ok, no) => {
   try {

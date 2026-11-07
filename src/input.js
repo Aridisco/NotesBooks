@@ -8,13 +8,22 @@ import { compPlace, openLabel, wpts } from './circuit.js';
 import { TCOL, THL, badgePos, cellAt, linkOf, openCell, openLink, tablePlace, tgeo } from './objects.js';
 import { openMath } from './math.js';
 import { closePops, props, setTool } from './toolbar.js';
-import { codeFit, openCode } from './code.js';
+import { CODE_H, CODE_W, codeFit, openCode } from './code.js';
 import { switchPage } from './notebooks.js';
 import { segInRect } from './geom.js';
 
 const w2 = (px, py) => {
   const v = P().v;
   return [(px - v.x) / v.z - OX(), (py - v.y) / v.z];
+};
+// Moves a new object's origin so a w×h object stays fully visible, clear of the top bar and the tool palette.
+const inView = (q, w, h) => {
+  const v = P().v,
+    x0 = (8 - v.x) / v.z - OX(),
+    x1 = (cv.clientWidth - 8 - v.x) / v.z - OX(),
+    y0 = (68 - v.y) / v.z,
+    y1 = (cv.clientHeight - 150 - v.y) / v.z;
+  return [Math.max(x0, Math.min(q[0], x1 - w)), Math.max(y0, Math.min(q[1], y1 - h))];
 };
 function dseg(px, py, x1, y1, x2, y2) {
   const l = (x2 - x1) ** 2 + (y2 - y1) ** 2;
@@ -47,7 +56,10 @@ function hit(x0, y0) {
       const q = polyPts(b, e.n || 5);
       for (let j = 0; j < q.length; j++) if (dseg(x, y, ...q[j], ...q[(j + 1) % q.length]) < tol) return e;
     } else if (e.t === 'free') {
-      for (let j = 0; j < e.pts.length; j++) if (Math.hypot(x - e.x - e.pts[j][0], y - e.y - e.pts[j][1]) < tol + e.sw) return e;
+      // test the segments, not just the sampled points: a straight or fast stroke has few vertices
+      const q = e.pts, r = tol + e.sw;
+      if (q.length === 1 && Math.hypot(x - e.x - q[0][0], y - e.y - q[0][1]) < r) return e;
+      for (let j = 0; j < q.length - 1; j++) if (dseg(x, y, e.x + q[j][0], e.y + q[j][1], e.x + q[j + 1][0], e.y + q[j + 1][1]) < r) return e;
     } else if (e.t === 'text' || e.t === 'code' || e.t === 'math' || e.t === 'img' || e.t === 'comp' || e.t === 'table' || e.t === 'graph' || e.fill !== 'none') {
       if (x >= b.x - tol && x <= b.x + b.w + tol && y >= b.y - tol && y <= b.y + b.h + tol) return e;
     } else {
@@ -423,7 +435,9 @@ cv.addEventListener('pointerdown', ev => {
   }
   if (ST.tool === 'eraser') {
     ST.act = {
-      k: 'erase'
+      k: 'erase',
+      lx: x,
+      ly: y
     };
     const h = hit(x, y);
     if (h) {
@@ -450,7 +464,7 @@ cv.addEventListener('pointerdown', ev => {
       h.hide = true;
       draw();
       openCode(h.x, h.y, h);
-    } else openCode(...cl([x, y]));
+    } else openCode(...inView(cl([x, y]), CODE_W, CODE_H));
     props();
     return;
   }
@@ -464,7 +478,7 @@ cv.addEventListener('pointerdown', ev => {
     return;
   }
   if (ST.tool === 'table') {
-    tablePlace(x, y);
+    tablePlace(...inView([x, y], 360, 132));
     setTool('select');
     return;
   }
@@ -547,11 +561,17 @@ cv.addEventListener('pointermove', ev => {
     ST.act.x2 = x;
     ST.act.y2 = y;
   } else if (ST.act.k === 'erase') {
-    const h = hit(x, y);
-    if (h) {
-      p.els = p.els.filter(e => e !== h);
-      ST.act.m = 1;
+    // sample the path since the last event so a quick swipe can't jump over a thin stroke
+    const a = ST.act, lx = a.lx ?? x, ly = a.ly ?? y, n = Math.max(1, Math.ceil(Math.hypot(x - lx, y - ly) * p.v.z / 6));
+    for (let k = 1; k <= n; k++) {
+      const h = hit(lx + (x - lx) * k / n, ly + (y - ly) * k / n);
+      if (h) {
+        p.els = p.els.filter(e => e !== h);
+        a.m = 1;
+      }
     }
+    a.lx = x;
+    a.ly = y;
   } else if (ST.act.k === 'rs') {
     const e = ST.act.e,
       o = ST.act.o,

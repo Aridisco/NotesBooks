@@ -321,11 +321,17 @@ function drawEl(e) {
   }
   ST.ctx.stroke();
 }
+// Translucent ink turns muddy over a dark page, so it needs more opacity there.
+const DARKQ = matchMedia('(prefers-color-scheme: dark)');
+const hlAlpha = () => {
+  const m = document.documentElement.dataset.theme;
+  return (m ? m === 'dark' : DARKQ.matches) ? .62 : .4;
+};
 export function drawR(e) {
   if (e.hl) {
     // highlighter: one translucent stroke so overlaps inside it do not darken
     ST.ctx.save();
-    ST.ctx.globalAlpha = .4;
+    ST.ctx.globalAlpha = hlAlpha();
     drawEl(e);
     ST.ctx.restore();
     return;
@@ -663,6 +669,24 @@ export function describePage() {
   const texts = p.els.filter(e => e.t === 'text' && e.text).slice(0, 10).map(e => e.text.replace(/\s+/g, ' ').slice(0, 60));
   el.textContent = 'Page "' + p.name + '": ' + p.els.length + ' objects (' + kinds + ').' + (texts.length ? ' Text: ' + texts.join('; ') : '');
 }
+// Undo history is kept per page while the app stays open, so leaving a page and coming back doesn't wipe it.
+const HIST = new Map();
+const keepHist = id => {
+  HIST.delete(id);
+  HIST.set(id, { h: ST.hist, i: ST.hi });
+  if (HIST.size > 30) HIST.delete(HIST.keys().next().value);
+};
+// Resumes the saved history of the active page, unless its content changed meanwhile (restore, cloud pull).
+export function openHist() {
+  const now = JSON.stringify(P().els), k = HIST.get(P().id);
+  if (k && k.h[k.i] === now) {
+    ST.hist = k.h;
+    ST.hi = k.i;
+  } else {
+    ST.hist = [now];
+    ST.hi = 0;
+  }
+}
 export function commit() {
   const p = P();
   dirty.add(p.id);
@@ -672,6 +696,7 @@ export function commit() {
     ST.hist.shift();
   }
   ST.hi = ST.hist.length - 1;
+  keepHist(p.id);
   VER.set(p, (VER.get(p) || 0) + 1);
   describePage();
   snapshotSoon();
@@ -682,6 +707,7 @@ export function undo(d) {
   const n = ST.hi + d;
   if (n < 0 || n >= ST.hist.length) return;
   ST.hi = n;
+  keepHist(ST.S.cur);
   P().els = JSON.parse(ST.hist[ST.hi]);
   VER.set(P(), (VER.get(P()) || 0) + 1);
   dirty.add(ST.S.cur);

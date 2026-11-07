@@ -1,6 +1,6 @@
 import { ST, P, dirty } from './state.js';
-import { $, esc, uid } from './util.js';
-import { chunks, planBatches, syncAction } from './syncLogic.js';
+import { $, esc, mod, uid } from './util.js';
+import { chunks, planBatches, syncAction, pageDoc, decodePages } from './syncLogic.js';
 import { report } from './report.js';
 import { askChoice } from './dialog.js';
 import { I } from './icons.js';
@@ -44,8 +44,8 @@ export const save = () => {
     const m = JSON.stringify(metaOf(0));
     if (m !== ST.curMeta || dirty.size) {
       ST.curMeta = m;
-      ST.S.ts = Date.now();
-      if (ST.cdb) setStat('☁ unsaved changes · Ctrl+S to save');
+      ST.S.ts = Math.max(Date.now(), (ST.S.ts || 0) + 1);
+      if (ST.cdb) setStat('☁ unsaved changes · ' + mod('Ctrl+S') + ' to save');
     }
   }
   clearTimeout(ST.lt);
@@ -53,85 +53,67 @@ export const save = () => {
 };
 async function flush(all) {
   if (!ST.cdb) return;
+  const db = ST.cdb, account = cuid;
   try {
     if (all && !ST.S.ts) ST.S.ts = Date.now();
-    const ids = new Set(),
+    const revision = crypto.randomUUID(),
       dd = new Set(dirty),
       ops = [],
-      counts = new Map(),
-      doc = (id, i) => ST.cdb.doc('p_' + id + '_' + i);
+      versions = new Map(),
+      written = new Map();
     for (const n of ST.S.nbs) for (const p of n.pages) {
-      ids.add(p.id);
-      if (all || dd.has(p.id) || !ST.known.has(p.id)) {
-        const c = chunks(JSON.stringify({ els: p.els }));
-        c.forEach((d, i) => ops.push({ ref: doc(p.id, i), data: { d } }));
-        for (let i = c.length; i < (ST.known.get(p.id) || 0); i++) ops.push({ ref: doc(p.id, i) });
-        counts.set(p.id, c.length);
+      let version = ST.known.get(p.id);
+      if (all || dd.has(p.id) || !version?.revision) {
+        const json = JSON.stringify({ els: p.els }), c = chunks(json);
+        c.forEach((d, i) => ops.push({ ref: db.doc(pageDoc(p.id, revision, i)), data: { d } }));
+        version = { revision, chunks: c.length };
+        written.set(p.id, json);
       }
-    }
-    for (const [id, k] of ST.known) if (!ids.has(id)) {
-      for (let i = 0; i < k; i++) ops.push({ ref: doc(id, i) });
-      counts.set(id, null);
+      versions.set(p.id, version);
     }
     const mm = metaOf(1);
-    lastWrite = mm.ts;
-    const meta = { ref: ST.cdb.doc('meta'), data: { d: JSON.stringify(mm) } };
-    // Page chunks and the meta document are committed together (meta last), so an interrupted
-    // save leaves the previous cloud version intact instead of a mix of old and new pages.
+    for (const n of mm.nbs) for (const p of n.pages) Object.assign(p, versions.get(p.id));
+    const meta = { ref: db.doc('meta'), data: { d: JSON.stringify(mm) } };
+    // Previous versions must survive both failed saves and readers holding an older meta snapshot.
+    // shortcut: old versions are retained; add coordinated cleanup when storage or read costs require it.
     for (const group of planBatches(ops, meta)) {
-      const b = ST.cdb.firestore.batch();
+      const b = db.firestore.batch();
       group.forEach(o => o.data ? b.set(o.ref, o.data) : b.delete(o.ref));
       await b.commit();
     }
-    counts.forEach((k, id) => k === null ? ST.known.delete(id) : ST.known.set(id, k));
-    dd.forEach(i => dirty.delete(i));
+    if (ST.cdb !== db) return;
+    lastWrite = mm.ts;
+    ST.known = versions;
+    const current = new Map(ST.S.nbs.flatMap(n => n.pages.map(p => [p.id, p])));
+    for (const id of dd) {
+      const p = current.get(id);
+      if (!p || written.get(id) === JSON.stringify({ els: p.els })) dirty.delete(id);
+    }
     ST.S.syncTs = mm.ts;
-    ST.S.acct = cuid;
+    ST.S.acct = account;
     lsw();
-    setStat('☁ saved ✓');
+    setStat(unsaved() ? '☁ unsaved changes · ' + mod('Ctrl+S') + ' to save' : '☁ saved ✓');
   } catch (e) {
+    if (ST.cdb !== db) return;
     report(e, 'Cloud save failed');
     setStat('☁ sync error: ' + (e && e.code || 'unknown'));
   }
 }
 async function pull(m, merge) {
+  const db = ST.cdb;
   ST.pulling = true;
   try {
     const old = ST.S.nbs,
-      q = await ST.cdb.get(),
-      raw = {},
-      pg = {};
-    q.docs.forEach(d => {
-      const x = /^p_([a-z0-9]+)(?:_(\d+))?$/.exec(d.id);
-      if (!x) return;
-      const r = raw[x[1]] = raw[x[1]] || {
-        c: []
-      };
-      if (x[2] === undefined) r.l = d.data().d;else r.c[+x[2]] = d.data().d;
-    });
-    const damaged = [];
-    for (const id in raw) {
-      const r = raw[id];
-      try {
-        pg[id] = JSON.parse(r.c.length ? r.c.join('') : r.l).els;
-      } catch (e) {
-        damaged.push(id);
-      }
-    }
-    if (damaged.length) {
-      // Replacing local data with an empty page would wipe it from the cloud on the next save.
-      const names = m.nbs.flatMap(n => n.pages).filter(p => damaged.includes(p.id)).map(p => p.name);
-      throw new Error('The cloud copy of ' + (names.join(', ') || 'a page') + ' is damaged. Nothing was replaced.');
-    }
-    ST.known = new Map(Object.keys(raw).map(id => [id, raw[id].c.length]));
+      q = await db.get(),
+      { pages: pg, known } = decodePages(m, new Map(q.docs.map(d => [d.id, d.data().d])));
+    if (ST.cdb !== db) return;
+    ST.known = known;
     const ov = {},
-      op = {},
-      localEls = {};
+      op = {};
     ST.S.nbs.forEach(n => {
       op[n.id] = n.open;
       n.pages.forEach(p => {
         ov[p.id] = p.v;
-        localEls[p.id] = p.els;
       });
     });
     ST.S.nbs = m.nbs.map(n => ({
@@ -139,7 +121,7 @@ async function pull(m, merge) {
       open: op[n.id] !== false,
       pages: n.pages.map(p => ({
         ...p,
-        els: pg[p.id] || localEls[p.id] || [],
+        els: pg.get(p.id),
         v: ov[p.id] || {
           x: 0,
           y: 0,
@@ -176,6 +158,7 @@ async function pull(m, merge) {
 }
 let cuid = '';
 let lastWrite = 0;
+let saving = null;
 const pristineNb = n => n.pages.length === 1 && !n.pages[0].els.length && /^(My notebook|Notebook \d+)$/.test(n.name);
 let asking = false;
 async function resolveConflict(m) {
@@ -213,7 +196,7 @@ async function resolveConflict(m) {
 }
 async function onMeta(sn) {
   if (asking) return;
-  if (ST.pulling || ST.act) {
+  if (ST.pulling || ST.act || saving) {
     setTimeout(() => onMeta(sn), 400);
     return;
   }
@@ -231,7 +214,7 @@ async function onMeta(sn) {
       else if (act !== 'none') await pull(m, act === 'merge');
     }
     ST.ready = true;
-    if (!ST.cstat.includes('error')) setStat(unsaved() ? '☁ unsaved changes · Ctrl+S to save' : '☁ saved ✓');
+    if (!ST.cstat.includes('error')) setStat(unsaved() ? '☁ unsaved changes · ' + mod('Ctrl+S') + ' to save' : '☁ saved ✓');
   } catch (e) {
     ST.ready = true;
     report(e, 'Cloud sync failed');
@@ -246,11 +229,17 @@ export async function doSave() {
     setStat(cuid ? '☁ connecting…' : 'Sign in with Google to save to the cloud');
     return;
   }
-  if (!ST.ready) return;
+  if (!ST.ready || ST.pulling) return;
+  if (saving) return saving;
   setStat('☁ saving…');
   clearTimeout(ST.lt);
   lsw();
-  await flush(!ST.S.syncTs);
+  saving = flush(!ST.S.syncTs);
+  try {
+    await saving;
+  } finally {
+    saving = null;
+  }
   if (!unsaved()) $('#svbar').hidden = true;
 }
 addEventListener('keydown', e => {
@@ -271,7 +260,7 @@ $('#svnow').onclick = () => doSave();
 $('#svx').onclick = () => {
   $('#svbar').hidden = true;
 };
-export const saveBtn = () => '<button class="ib' + (unsaved() ? ' on' : '') + '" data-a="save" title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">' + I.deviceFloppy + '</button>';
+export const saveBtn = () => '<button class="ib' + (unsaved() ? ' on' : '') + '" data-a="save" title="Save to cloud (' + mod('Ctrl+S') + ')" aria-label="Save to cloud (' + mod('Ctrl+S') + ')">' + I.deviceFloppy + '</button>';
 let fbAuth = null;
 let fbUnsub = null;
 export async function cloudInit() {
@@ -288,6 +277,7 @@ export async function cloudInit() {
         return;
       }
       if (b.dataset.sy !== undefined) {
+        if (saving || ST.pulling) return;
         if (unsaved() && !confirm('You have unsaved changes. Load from cloud anyway?')) return;
         if (ST.cdb) ST.cdb.doc('meta').get().then(sn => sn.exists ? pull(JSON.parse(sn.data().d), false) : setStat('☁ nothing in the cloud yet')).catch(er => {
           report(er, 'Load from cloud failed');
@@ -303,6 +293,8 @@ export async function cloudInit() {
     });
     fbAuth.onAuthStateChanged(u => {
       fbUnsub = null;
+      ST.known = new Map();
+      lastWrite = 0;
       if (!u) {
         ST.cdb = null;
         cuid = '';
@@ -311,7 +303,7 @@ export async function cloudInit() {
         setAcct('<button class="gbtn" data-si>Sign in with Google</button>');
         return;
       }
-      setAcct('<span>' + esc(u.displayName || u.email || 'Signed in') + '</span><button class="gbtn" data-sv title="Save to cloud (Ctrl+S)" aria-label="Save to cloud (Ctrl+S)">' + I.deviceFloppy + 'Save</button><button class="gbtn" data-sy title="Replace this device with the cloud copy" aria-label="Replace this device with the cloud copy">Load from cloud</button><button class="gbtn" data-so>Sign out</button>');
+      setAcct('<span>' + esc(u.displayName || u.email || 'Signed in') + '</span><button class="gbtn" data-sv title="Save to cloud (' + mod('Ctrl+S') + ')" aria-label="Save to cloud (' + mod('Ctrl+S') + ')">' + I.deviceFloppy + 'Save</button><button class="gbtn" data-sy title="Replace this device with the cloud copy" aria-label="Replace this device with the cloud copy">Load from cloud</button><button class="gbtn" data-so>Sign out</button>');
       cuid = u.uid;
       ST.ready = false;
       ST.cdb = fs.collection('users').doc(u.uid).collection('sketchbooks');

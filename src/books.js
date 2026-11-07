@@ -6,14 +6,19 @@ import { loadScript } from './env.js';
 import { A4W, draw } from './render.js';
 import { home } from './notebooks.js';
 import { idbp } from './platform.js';
+import { integrityFor } from './scriptIntegrity.js';
 
 /* books (PDF) */
 let pdfP = null;
 const BKD = new Map();
 export const BKC = new Map();
 function loadPdfJs() {
-  if (!pdfP) pdfP = loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js').then(() => {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  if (!pdfP) pdfP = loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js').then(async () => {
+    // Workers have no script integrity attribute: verify the fetch before creating their local URL.
+    const url = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const response = await fetch(url, { integrity: integrityFor(url) });
+    if (!response.ok) throw new Error('PDF worker could not load: ' + response.status);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(await response.blob());
   }).catch(e => {
     pdfP = null;
     throw e;

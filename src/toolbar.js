@@ -1,8 +1,8 @@
 import { P, ST } from './state.js';
-import { $, cv, esc, uid } from './util.js';
+import { $, cname, cv, esc, mod, uid } from './util.js';
 import { doSave, save, saveBtn } from './cloud.js';
 import { BG, CC, FF, FSOK, THC, resize } from './env.js';
-import { OX, commit, draw, fitA4, spreadOf, tfit, undo } from './render.js';
+import { A4H, A4W, OX, bb, commit, draw, fitA4, spreadOf, tfit, undo } from './render.js';
 import { endRename, load, nbOf, render } from './notebooks.js';
 import { rendererName, setRenderer } from './scene.js';
 import { ALN, ahHTML, align, cur, dssHTML, dupe, fitAll, selIds, union, zord } from './edit.js';
@@ -15,11 +15,14 @@ import { codeFit } from './code.js';
 import { LANGS } from './highlight.js';
 import { exportPNG } from './edit.js';
 import { exportBookPDF, exportPagePDF, openPalette, pageHistory } from './palette.js';
+import { report, toast } from './report.js';
 
 /* ---------- tool definitions ---------- */
 const SHAPES = [['rect', 'square', 'Rectangle (R)'], ['diamond', 'diamond', 'Diamond (D)'], ['ellipse', 'circle', 'Ellipse (O)'], ['poly', 'hexagon', 'Polygon (G)'], ['arrow', 'arrowUpRight', 'Arrow (A)'], ['curve', 'arrowCurveRight', 'Curved arrow (C)'], ['line', 'line', 'Line (L)']];
 const MORE = [['eraser', 'eraser', 'Eraser (E)'], ['hand', 'handStop', 'Pan (H)'], ['math', 'mathFunction', 'Formula and graph (M)'], ['img', 'photo', 'Image'], ['table', 'table', 'Table']];
 const CIRC = [['wire', 'bolt', 'Wire (orthogonal)'], ['cpal', 'bolt', 'Circuit components']];
+let popMode = '', popTrig = null, advOpen = false; // declared early: closePops() reads popMode and may run before the menu code below
+const TNAME = { rect: 'Rectangle', diamond: 'Diamond', ellipse: 'Ellipse', poly: 'Polygon', free: 'Drawing', line: 'Line', arrow: 'Arrow', curve: 'Curved arrow', text: 'Text', code: 'Code block', math: 'Formula', graph: 'Graph', img: 'Image', table: 'Table', comp: 'Component', wire: 'Wire' };
 const SC = ['auto', '#e03131', '#f08c00', '#2f9e44', '#1971c2', '#74c0fc', '#c2255c', '#7048e8'];
 const FC = ['none', '#ffc9c9', '#b2f2bb', '#a5d8ff', '#ffec99'];
 const PRESETS = { h1: 48, h2: 36, h3: 28, body: 24 };
@@ -44,11 +47,11 @@ const ALLT = SHAPES.concat(MORE, CIRC);
 try {
   const t = JSON.parse(localStorage.getItem('sketchbooks-toolbar'));
   if (t && t.g) TB = { v: 2, hidden: t.hidden || [], pins: (t.v >= 2 && t.pins ? t.pins : DEF_TB().pins).filter(k => ALLT.some(x => x[0] === k)), g: Object.assign(DEF_TB().g, t.g) };
-} catch (e) {}
+} catch (e) { report(e, 'Toolbar preferences could not be read', { quiet: true }); }
 const saveTB = () => {
   try {
     localStorage.setItem('sketchbooks-toolbar', JSON.stringify(TB));
-  } catch (e) {}
+  } catch (e) { report(e, 'Toolbar preferences could not be saved', { quiet: true }); }
 };
 const grp = t => t === 'free' ? 'pen' : t === 'hl' ? 'hl' : t === 'text' ? 'text' : t === 'code' ? 'code' : SHAPES.some(x => x[0] === t) ? 'shape' : null;
 
@@ -58,9 +61,11 @@ ST.cfs = ST.cfs || 18;
 ST.panel = false;
 ST.tbEdit = false;
 try {
-  ST.recent = JSON.parse(localStorage.getItem('sketchbooks-recent')) || [];
+  // earlier versions also stored preset colors here; drop those
+  ST.recent = (JSON.parse(localStorage.getItem('sketchbooks-recent')) || []).filter(c => !SC.includes(c) && !FC.includes(c));
 } catch (e) {
   ST.recent = [];
+  report(e, 'Recent colors could not be read', { quiet: true });
 }
 
 const ib = (icon, label, attrs = '', on = false) => `<button class="ib${on ? ' on' : ''}" ${attrs} title="${label}" aria-label="${label}">${I[icon]}</button>`;
@@ -68,6 +73,8 @@ const hex = (c, d) => /^#[0-9a-f]{6}$/i.test(c || '') ? c : d;
 
 export function closePops() {
   ['#toolpop', '#pgpop', '#bkpop'].forEach(s => $(s).hidden = true);
+  syncExpanded();
+  delete $('#tools').dataset.pop;
 }
 
 /* ---------- bottom tool bar: options row (changes with the tool) + tools row ---------- */
@@ -96,6 +103,7 @@ function optionsRow() {
 }
 // Tools from the Shapes and More menus that are not pinned to the bar; pinned ones leave the menu.
 const menuItems = g => (g === 'shapes' ? SHAPES : MORE.concat(P().circ ? CIRC : [])).filter(x => ST.tbEdit || !TB.pins.includes(x[0]));
+let toolsHTML = '';
 function renderTools() {
   const t = ST.tool, circ = P().circ, ed = ST.tbEdit;
   const shape = SHAPES.find(x => x[0] === ST.shape) || SHAPES[0];
@@ -118,7 +126,12 @@ function renderTools() {
     return ib(x[1], x[2], ed ? `data-pin="${x[0]}" aria-pressed="true"` : `data-t="${x[0]}" aria-pressed="${on}"`, on && !ed);
   }).join('');
   parts.splice(parts.length - 1, 0, pinned);
-  $('#tools').innerHTML = optionsRow() + '<div class="trow">' + parts.join('') + '</div>' + (ed ? '<div class="trow hint">Tap a color or size to change it · tap a tool to show or hide it · open Shapes or ⋯ to pin more tools here</div>' : '');
+  const html = optionsRow() + '<div class="trow">' + parts.join('') + '</div>' + (ed ? '<div class="trow hint">Tap a color or size to change it · tap a tool to show or hide it · open Shapes or ⋯ to pin more tools here</div>' : '');
+  // Rebuilding unchanged markup would detach the button under the pointer (e.g. a text editor's blur
+  // re-renders between pointerdown and click), and that first tap would be lost.
+  if (html === toolsHTML) return;
+  toolsHTML = html;
+  $('#tools').innerHTML = html;
 }
 function openPop(g, keep) {
   const pop = $('#toolpop');
@@ -132,6 +145,7 @@ function openPop(g, keep) {
     (ed ? '<small class="hint">Tap a tool to pin it to the bar · tap it again to put it back</small>' + (g === 'shapes' ? `<button class="b" data-hide="shapes">${TB.hidden.includes('shapes') ? 'Show' : 'Hide'} the Shapes button</button>` : '') : '');
   pop.style.bottom = $('#main').getBoundingClientRect().bottom - $('#tools').getBoundingClientRect().top + 10 + 'px';
   pop.hidden = false;
+  $('#tools').dataset.pop = g;
 }
 export function setTool(t) {
   ST.tool = t;
@@ -224,7 +238,7 @@ document.addEventListener('pointerdown', e => {
 const swatch = (kind, c, cur_) => {
   const key = kind === 's' ? 'data-s' : 'data-f';
   const bg = c === 'auto' ? 'var(--ink)' : c === 'none' ? 'repeating-linear-gradient(45deg,var(--line) 0 3px,transparent 3px 6px)' : c;
-  const name = (kind === 's' ? 'Stroke color ' : 'Fill ') + c;
+  const name = (kind === 's' ? 'Stroke color ' : 'Fill ') + cname(c);
   return `<button class="sw${cur_ === c ? ' on' : ''}" ${key}="${c}" aria-label="${name}" aria-pressed="${cur_ === c}" style="background:${bg}"></button>`;
 };
 const customColor = (kind, value, label) => `<label class="cc" title="${label}"><input type="color" data-cs="${kind}" value="${hex(value, '#000000')}" aria-label="${label}"></label>`;
@@ -233,12 +247,12 @@ const numField = (k, label, v, min, max, step = 1) => `<label class="nf"><span>$
 // Page navigation bar: back to the notebook, page title and switcher, then history, view and menus.
 function topHTML() {
   const p = P(), n = nbOf(p.id), i = n.pages.indexOf(p);
-  const title = ST.ren === p.id ? `<input class="ptitle" data-r="${p.id}" value="${esc(p.name)}" aria-label="Page name">` : `<button class="ptitle" data-a="ren" title="Rename page">${esc(p.name)}</button>`;
+  const title = ST.ren === p.id ? `<input class="ptitle" data-r="${p.id}" value="${esc(p.name)}" aria-label="Page name">` : `<button class="ptitle" data-a="ren" title="Rename page">${esc(p.name)}<span class="pe" aria-hidden="true">${I.pencil}</span></button>`;
   return `<div class="nl"><button class="back" data-a="back" title="Back to ${esc(n.name)}">${I.chevronLeft}<span>${esc(n.name)}</span></button></div>` +
     `<div class="nc">${title}<span class="pager">` + ib('chevronLeft', 'Previous page (Page Up)', 'data-a="pp"' + (i ? '' : ' disabled')) + `<span class="pgn" aria-live="polite">${i + 1} / ${n.pages.length}</span>` + ib('chevronRight', 'Next page (Page Down)', 'data-a="pn"' + (i < n.pages.length - 1 ? '' : ' disabled')) + ib('filePlus', 'New page', 'data-a="np"') + '</span></div>' +
-    '<div class="nr">' + ib('arrowBackUp', 'Undo (Ctrl+Z)', 'data-a="u"') + ib('arrowForwardUp', 'Redo (Ctrl+Shift+Z)', 'data-a="r"') +
+    '<div class="nr">' + ib('arrowBackUp', mod('Undo (Ctrl+Z)'), 'data-a="u"') + ib('arrowForwardUp', mod('Redo (Ctrl+Shift+Z)'), 'data-a="r"') +
     '<span class="sep"></span><span class="zoom">' + ib('minus', 'Zoom out', 'data-a="zo"') + '<button id="zoomv" class="zv" data-a="fit" title="Fit to content" aria-label="Zoom level, tap to fit"></button>' + ib('plus', 'Zoom in', 'data-a="zi"') + '</span>' +
-    '<span class="sep"></span>' + (ST.cdb ? saveBtn() : '') + ib('share', 'Export and share', 'data-a="m-share" aria-haspopup="true"') + ib('fileSettings', 'Paper: sheet, background, pattern', 'data-a="m-page" aria-haspopup="true"') + ib('dotsVertical', 'More: tools, settings, appearance', 'data-a="m-more" aria-haspopup="true"') + '</div>';
+    '<span class="sep"></span>' + (ST.cdb ? saveBtn() : '') + ib('fileExport', 'Export: image or PDF', 'data-a="m-share" aria-haspopup="true"') + ib('fileSettings', 'Paper: sheet, background, pattern', 'data-a="m-page" aria-haspopup="true"') + ib('dotsVertical', 'More: tools, settings, appearance', 'data-a="m-more" aria-haspopup="true"') + '</div>';
 }
 function ctxHTML(s) {
   const c = cur();
@@ -247,12 +261,12 @@ function ctxHTML(s) {
   return (one && one.t === 'table' ? ib('tableOptions', 'Table: rows, columns, cells', 'data-a="m-table" aria-haspopup="true"') + '<span class="sep"></span>' : '') +
     (one && one.t === 'poly' ? numField('n', 'Sides', one.n || 5, 3, 12) + '<span class="sep"></span>' : '') +
     SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '<span class="sep"></span>' +
-    ib('copy', 'Duplicate (Ctrl+D)', 'data-a="dup"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock"', c.every(q => q.lk)) + ib('trash', 'Delete', 'data-a="del"') +
+    ib('copy', mod('Duplicate (Ctrl+D)'), 'data-a="dup"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock" aria-pressed="' + c.every(q => q.lk) + '"', c.every(q => q.lk)) + ib('trash', 'Delete', 'data-a="del"') +
     '<span class="sep"></span>' + ib('adjustments', 'All properties', 'data-a="panel"', ST.panel);
 }
 function recentRow(kind) {
   const key = kind === 's' ? 'data-s' : 'data-f';
-  return ST.recent.length ? '<div class="rc">' + ST.recent.map(c => `<button class="sw" ${key}="${c}" aria-label="Recent color ${c}" style="background:${c}"></button>`).join('') + '</div>' : '';
+  return ST.recent.length ? '<div class="rc">' + ST.recent.map(c => `<button class="sw" ${key}="${c}" aria-label="Recent color ${cname(c)}" style="background:${c}"></button>`).join('') + '</div>' : '';
 }
 function panelHTML(s) {
   const c = cur();
@@ -262,7 +276,7 @@ function panelHTML(s) {
   const lineLike = s && ['arrow', 'curve', 'line', 'free', 'wire'].includes(s.t);
   const stroke = s ? s.stroke : ST.stroke, fill = s ? s.fill : ST.fill;
   const fs = s && s.t === 'text' ? s.fs || 24 : ST.tfs;
-  let h = '<div class="ph"><b>' + (s ? s.t[0].toUpperCase() + s.t.slice(1) : 'Defaults for new objects') + '</b>' + ib('x', 'Close panel', 'data-a="panel"') + '</div>';
+  let h = '<div class="ph"><b>' + (s ? TNAME[s.t] || s.t[0].toUpperCase() + s.t.slice(1) : 'Defaults for new objects') + '</b>' + ib('x', 'Close panel', 'data-a="panel"') + '</div>';
   if (sizable) h += '<div class="pr">' + numField('w', 'W', Math.abs(s.w), 2, 5000) + numField('h', 'H', Math.abs(s.h), 2, 5000) + '</div>';
   h += '<div class="pt">Stroke</div><div class="pr">' + SC.map(x => swatch('s', x, stroke)).join('') + customColor('stroke', stroke, 'Custom stroke color') + '</div>' + recentRow('s') +
     '<div class="pr">' + numField('sw', 'Width', s ? s.sw : ST.sw, 1, 40, 0.5) + [1, 2, 4].map(w => `<button class="b${(s ? s.sw : ST.sw) === w ? ' on' : ''}" data-w="${w}" aria-label="Line width ${w}">${w}</button>`).join('') + '</div>';
@@ -270,7 +284,7 @@ function panelHTML(s) {
     h += '<div class="pt">Fill</div><div class="pr">' + FC.map(x => swatch('f', x, fill)).join('') + customColor('fill', fill, 'Custom fill color') + '</div>' + recentRow('f');
   }
   if (!isText && !isCode && !(s && ['math', 'img', 'table', 'comp'].includes(s.t))) {
-    h += '<div class="pt">Style</div><div class="pr"><label class="rgl" title="Sketchiness: 0 = clean, 3 = very messy">✎<input type="range" id="rgs" min="0" max="3" step="0.5" value="' + (s && s.rg != null ? s.rg : ST.rough) + '" aria-label="Sketchiness"></label>' + dssHTML(s) +
+    h += '<div class="pt">Style</div><div class="pr"><label class="rgl" title="Hand-drawn look: 0 = clean, 3 = very messy"><span>Hand-drawn</span><input type="range" id="rgs" min="0" max="3" step="0.5" value="' + (s && s.rg != null ? s.rg : ST.rough) + '" aria-label="Sketchiness"></label>' + dssHTML(s) +
       ((s && (s.t === 'arrow' || s.t === 'curve')) || ST.tool === 'arrow' || ST.tool === 'curve' ? ahHTML(s) : '') + '</div>';
   }
   if (isCode) {
@@ -283,8 +297,8 @@ function panelHTML(s) {
   }
   if (c.length) {
     h += '<div class="pt">Arrange</div><div class="pr">' + ALN() + (c.some(q => q.t === 'comp') ? ib('rotateClockwise', 'Rotate 90°', 'data-a="rot"') : '') + 
-      ib('link', 'Add / edit link', 'data-a="link"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock"', c.every(q => q.lk)) +
-      ib('copy', 'Duplicate (Ctrl+D)', 'data-a="dup"') + `<button class="b" data-a="fr" aria-label="Bring to front">Front</button><button class="b" data-a="bk" aria-label="Send to back">Back</button>` + ib('trash', 'Delete', 'data-a="del"') + '</div>';
+      ib('link', 'Add / edit link', 'data-a="link"') + ib(c.every(q => q.lk) ? 'lock' : 'lockOpen', 'Lock / unlock', 'data-a="lock" aria-pressed="' + c.every(q => q.lk) + '"', c.every(q => q.lk)) +
+      ib('copy', mod('Duplicate (Ctrl+D)'), 'data-a="dup"') + `<button class="b" data-a="fr" aria-label="Bring to front">Front</button><button class="b" data-a="bk" aria-label="Send to back">Back</button>` + ib('trash', 'Delete', 'data-a="del"') + '</div>';
   }
   return h;
 }
@@ -294,6 +308,7 @@ export function props() {
   renderTools();
   if (ST.S.view === 'page') {
     $('#topr').innerHTML = topHTML();
+    syncExpanded();
     const ri = $('#topr input[data-r]');
     if (ri) {
       ri.focus();
@@ -313,10 +328,18 @@ export function props() {
 
 // Keeps the contextual bar next to the selection (called on every redraw, so it must stay cheap).
 let ctxW = 0;
+// Undo/Redo grey out when there is nothing to step to; cheap enough to run on every redraw.
+function syncUndo() {
+  const u = $('#topr [data-a="u"]'), r = $('#topr [data-a="r"]');
+  if (u && u.disabled !== (ST.hi <= 0)) u.disabled = ST.hi <= 0;
+  if (r && r.disabled !== (ST.hi >= ST.hist.length - 1)) r.disabled = ST.hi >= ST.hist.length - 1;
+}
 export function placeCtx() {
+  syncUndo();
   const el = $('#ctx'), c = el.dataset.on ? cur() : [];
   const busy = ST.act && ['move', 'gmove', 'rs', 'box', 'draw', 'pan', 'erase'].includes(ST.act.k);
-  if (!c.length || ST.tool !== 'select' || ST.ed || busy) {
+  // The properties panel repeats every ctx action and would otherwise sit on top of it.
+  if (!c.length || ST.tool !== 'select' || ST.ed || busy || ST.panel) {
     el.hidden = true;
     return;
   }
@@ -334,10 +357,11 @@ export function placeCtx() {
 
 /* numbers and colors typed or picked in the bar/panel */
 function remember(c) {
+  if (SC.includes(c) || FC.includes(c)) return;
   ST.recent = [c, ...ST.recent.filter(x => x !== c)].slice(0, 8);
   try {
     localStorage.setItem('sketchbooks-recent', JSON.stringify(ST.recent));
-  } catch (e) {}
+  } catch (e) { report(e, 'Recent colors could not be saved', { quiet: true }); }
 }
 function setColor(kind, v) {
   if (kind === 'stroke') {
@@ -427,7 +451,7 @@ export function setAppearance(k, v) {
   else v === 'auto' ? delete r.theme : r.theme = v;
   try {
     localStorage.setItem('sketchbooks-theme', JSON.stringify({ skin: r.skin, mode: r.theme }));
-  } catch (e) {}
+  } catch (e) { report(e, 'Appearance preference could not be saved', { quiet: true }); }
   for (const c in CC) delete CC[c];
   THC.clear();
   if (ST.S.view === 'page') draw();else render();
@@ -626,20 +650,31 @@ function menuHTML(m) {
     seg('Circuit tools', [['0', 'Off'], ['1', 'On']].map(x => mb(x[1], 'data-pc="' + x[0] + '"', (p.circ ? '1' : '0') === x[0])).join(''));
   if (m === 'lib') return mi('download', 'Download backup', 'data-a="bak"') + mi('upload', 'Import backup', 'data-a="imp"') + '<hr>' + appearanceHTML();
   const books = (nbOf(p.id).books || []).length;
-  return mi('command', 'Commands <kbd>Ctrl K</kbd>', 'data-a="palette"') + mi('history', 'Page history', 'data-a="hist"') + mi('microphone', 'Voice notes', 'data-a="rec"') + (books ? mi('book', 'Linked books', 'data-a="books"') : '') + (FSOK ? mi('arrowsMaximize', 'Full screen', 'data-a="fs"') : '') +
-    '<hr>' + seg('Snapping', mb('Off', 'data-sn="0"', !ST.snap) + mb('On', 'data-sn="1"', ST.snap)) + seg('Performance', [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('')) + seg('Renderer', [['gpu', 'GPU tiles'], ['classic', 'Classic']].map(x => mb(x[1], 'data-rd="' + x[0] + '"', rendererName() === x[0])).join('')) + '<hr>' + appearanceHTML();
+  return mi('command', 'Commands <kbd>' + mod('Ctrl K') + '</kbd>', 'data-a="palette"') + mi('history', 'Page history', 'data-a="hist"') + mi('microphone', 'Voice notes', 'data-a="rec"') + (books ? mi('book', 'Linked books', 'data-a="books"') : '') + (FSOK ? mi('arrowsMaximize', 'Full screen', 'data-a="fs"') : '') +
+    '<hr>' + seg('Snapping', mb('Off', 'data-sn="0"', !ST.snap) + mb('On', 'data-sn="1"', ST.snap)) + '<details class="adv"' + (advOpen ? ' open' : '') + '><summary>Advanced</summary>' + seg('Performance', [['', 'Auto'], ['1', 'Lite'], ['0', 'Full']].map(x => mb(x[1], 'data-pf="' + x[0] + '"', ST.PERF === x[0])).join('')) + seg('Renderer', [['gpu', 'GPU tiles'], ['classic', 'Classic']].map(x => mb(x[1], 'data-rd="' + x[0] + '"', rendererName() === x[0])).join('')) + '</details><hr>' + appearanceHTML();
 }
-let popMode = '';
+// aria-expanded follows the open menu, and Esc hands focus back to the button that opened it.
+function syncExpanded() {
+  const open = !$('#pgpop').hidden;
+  document.querySelectorAll('[data-a^="m-"][aria-haspopup],[data-a="lmore"]').forEach(b => b.setAttribute('aria-expanded', String(open && popMode === (b.dataset.a === 'lmore' ? 'lib' : b.dataset.a.slice(2)))));
+}
+function escPops() {
+  const was = !$('#pgpop').hidden;
+  closePops();
+  // props() runs right after and replaces the buttons, so refocus once the handler has finished.
+  if (was && popTrig) queueMicrotask(() => $(popTrig)?.focus());
+}
+$('#pgpop').addEventListener('toggle', e => { if (e.target.classList.contains('adv')) advOpen = e.target.open; }, true);
 // Menus open under the button that opened them; `toggle` closes the menu when its button is pressed again.
 export function pgpop(mode, toggle) {
-  const h = $('#pgpop'), same = !h.hidden && popMode === mode;
+  const h = $('#pgpop'), same = !h.hidden && popMode === mode, wasOpen = !h.hidden;
   closePops();
   if (same && toggle) return;
   popMode = mode;
   h.dataset.m = mode;
   h.innerHTML = menuHTML(mode);
   h.hidden = false;
-  const a = document.querySelector(mode === 'lib' ? '[data-a="lmore"]' : `[data-a="m-${mode}"]`);
+  const sel = mode === 'lib' ? '[data-a="lmore"]' : `[data-a="m-${mode}"]`, a = document.querySelector(sel);
   const r = a ? a.getBoundingClientRect() : { top: 56, bottom: 64, left: innerWidth - 48, right: innerWidth - 8 };
   // open below the button, lined up with whichever of its edges keeps the menu on screen; flip above when there is more room there
   h.style.left = h.style.right = h.style.top = h.style.bottom = '';
@@ -648,6 +683,9 @@ export function pgpop(mode, toggle) {
   if (up) h.style.bottom = innerHeight - r.top + 8 + 'px';else h.style.top = r.bottom + 8 + 'px';
   h.style.maxHeight = (up ? above : below) + 'px';
   h.style.transformOrigin = (up ? 'bottom ' : 'top ') + (h.style.right ? 'right' : 'left');
+  popTrig = a ? sel : null;
+  syncExpanded();
+  if (!wasOpen) h.querySelector('button')?.focus({ preventScroll: true });
 }
 $('#pgpop').onclick = e => {
   const b = e.target.closest('button');
@@ -679,7 +717,7 @@ $('#pgpop').onclick = e => {
     ST.PERF = b.dataset.pf;
     try {
       ST.PERF ? localStorage.setItem('sketchbooks-lite', ST.PERF) : localStorage.removeItem('sketchbooks-lite');
-    } catch (e) {}
+    } catch (e) { report(e, 'Performance preference could not be saved', { quiet: true }); }
     resize();
   }
   if (b.dataset.pc !== undefined) {
@@ -691,8 +729,10 @@ $('#pgpop').onclick = e => {
   if (b.dataset.pm === 'a4x2') enableSpread(p);else if (b.dataset.pm) {
     p.mode = b.dataset.pm;
     p.spread = false;
+    dropAutoSheet(p);
     if (p.mode === 'a4') fitA4(p);
   }
+  if (b.dataset.pm && b.dataset.pm !== 'inf') warnOffSheet(p);
   if (b.dataset.pb) p.bg = b.dataset.pb;
   if (b.dataset.pp) p.pat = b.dataset.pp;
   save();
@@ -707,11 +747,24 @@ function enableSpread(p) {
   let nx = nb.pages[i + 1];
   p.mode = 'a4';
   if (!nx || nx.mode !== 'a4') {
-    nx = { id: uid(), name: 'Page ' + (nb.pages.length + 1), els: [], v: p.v, mode: 'a4', pat: p.pat, bg: p.bg };
+    nx = { id: uid(), name: 'Page ' + (nb.pages.length + 1), els: [], v: p.v, mode: 'a4', pat: p.pat, bg: p.bg, auto: true };
     nb.pages.splice(i + 1, 0, nx);
   }
   p.spread = true;
   fitA4(p);
+}
+// Leaving Two A4 removes the blank sheet that enabling it created, so the notebook doesn't keep a page nobody asked for.
+function dropAutoSheet(p) {
+  const nb = nbOf(p.id), nx = nb.pages[nb.pages.indexOf(p) + 1];
+  if (nx && nx.auto && !nx.els.length) nb.pages.splice(nb.pages.indexOf(nx), 1);
+}
+// A4 sheets crop what lies outside them; say so instead of letting objects vanish.
+function warnOffSheet(p) {
+  const n = p.els.filter(e => {
+    const b = bb(e);
+    return b.x + b.w < 0 || b.x > A4W || b.y + b.h < 0 || b.y > A4H;
+  }).length;
+  if (n) toast(n + (n > 1 ? ' objects are' : ' object is') + ' outside the sheet and hidden. Switch to Infinite to see them.');
 }
 function del() {
   const ids = ST.msel.length ? ST.msel : ST.sel ? [ST.sel] : [];
@@ -725,7 +778,13 @@ function del() {
 
 /* ---------- keyboard ---------- */
 addEventListener('keydown', e => {
-  if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  // math-field (MathLive) and dialogs handle their own keys; page shortcuts must not reach them.
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable],math-field,dialog,[role=dialog]')) return;
+  // Library/notebook views sit over the editor: only Esc (close menus) applies there, never page edits.
+  if (ST.S.view !== 'page') {
+    if (e.key === 'Escape') escPops();
+    return;
+  }
   if (e.code === 'Space') {
     ST.space = true;
     e.preventDefault();
@@ -759,7 +818,7 @@ addEventListener('keydown', e => {
   }
   if (e.key === 'Escape') {
     $('#cpal').hidden = true;
-    closePops();
+    escPops();
     if (ST.panel) ST.panel = false;
     ST.sel = null;
     ST.msel = [];

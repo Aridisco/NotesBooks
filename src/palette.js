@@ -21,7 +21,7 @@ export async function pageHistory() {
   }
   if (!list.length) return toast('No saved versions yet. They are kept automatically while you work.');
   const pick = await askChoice('Page history', 'Restore "' + p.name + '" to an earlier version. The current version is saved first.',
-    list.map(v => ({ label: fmt(v.ts) + ' · ' + v.n + ' objects', value: String(v.ts) })).concat([{ label: 'Cancel', value: '' }]));
+    list.map(v => ({ label: fmt(v.ts) + ' · ' + v.n + ' objects', value: String(v.ts) })).concat([{ label: 'Cancel', value: '' }]), '');
   if (!pick) return;
   const els = await getVersion(p.id, +pick);
   if (!els) return toast('That version could not be read.');
@@ -111,7 +111,7 @@ export function openPalette() {
   d.addEventListener('click', e => {
     if (e.target === d) d.close();
   });
-  d.addEventListener('close', () => d.remove());
+  d.addEventListener('close', () => setTimeout(() => d.remove(), 250)); // stays in the DOM while its fade-out plays
   document.body.append(d);
   paint();
   d.showModal();

@@ -1,6 +1,6 @@
 // Math panel: a visual formula editor (MathLive), a solver (nerdamer), statistics, and live function graphs.
 import { P, ST } from './state.js';
-import { $, cv, uid } from './util.js';
+import { $, cv, mod, uid } from './util.js';
 import { save } from './cloud.js';
 import { loadMJ, loadNerd } from './env.js';
 import { cl, commit, drawView } from './render.js';
@@ -57,7 +57,7 @@ function ntex(v) {
   try {
     const d = Number(nerdamer(v).evaluate().text('decimals'));
     if (isFinite(d) && !Number.isInteger(d) && t.includes('\\')) t += '\\approx ' + +d.toFixed(4);
-  } catch (e) {}
+  } catch (e) { report(e, 'Decimal approximation unavailable', { quiet: true }); }
   return t;
 }
 const num = v => +Number(v).toPrecision(10);
@@ -176,6 +176,8 @@ function graphOpts() {
   const x0 = rng('#gx0') ?? -10, x1 = rng('#gx1') ?? 10;
   return { fx: getTex(), x0: Math.min(x0, x1 - 1e-6), x1: Math.max(x1, x0 + 1e-6), y0: rng('#gy0'), y1: rng('#gy1') };
 }
+const GHINT = $('#mpg .mhint').textContent;
+$('.mfoot .mhint').textContent = mod('Ctrl+Enter') + ' to insert';
 function preview() {
   if (tab !== 'g') return;
   const c = $('#gprev'), r = c.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2);
@@ -186,6 +188,10 @@ function preview() {
   ST.ctx = g;
   drawGraph({ x: 0, y: 0, w: r.width, h: r.height, stroke: medit && medit.t === 'graph' ? medit.stroke : 'auto', sw: 2, ...graphOpts() });
   ST.ctx = old;
+  // An equation such as x^2-4=0 is not a function of x: say so instead of showing an empty plot.
+  const hint = $('#mpg .mhint');
+  hint.classList.toggle('bad', getTex().includes('='));
+  hint.textContent = hint.classList.contains('bad') ? 'Enter an expression in x without “=”, e.g. x^2/4' : GHINT;
 }
 ['#gx0', '#gx1', '#gy0', '#gy1'].forEach(s => $(s).addEventListener('input', preview));
 // graphs that were still waiting for the solver redraw once it arrives

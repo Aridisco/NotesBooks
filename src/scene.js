@@ -6,19 +6,20 @@ import { ST } from './state.js';
 import { cv } from './util.js';
 import { css } from './env.js';
 import { A4W, GAP, bb, bgOf, draw, paintSheet } from './render.js';
+import { report } from './report.js';
 
 const TS = 512, MAX_TILES = 96, BUDGET_MS = 8, SETTLE_MS = 160;
 const LIVE = new Set(['draw', 'move', 'gmove', 'rs', 'tgrid']);
 let renderer = 'gpu';
 try {
   renderer = localStorage.getItem('sketchbooks-renderer') || 'gpu';
-} catch (e) {}
+} catch (e) { report(e, 'Renderer preference could not be read', { quiet: true }); }
 export const rendererName = () => renderer;
 export function setRenderer(r) {
   renderer = r;
   try {
     localStorage.setItem('sketchbooks-renderer', r);
-  } catch (e) {}
+  } catch (e) { report(e, 'Renderer preference could not be saved', { quiet: true }); }
   invalidateAll();
   gl && gl.clear(gl.COLOR_BUFFER_BIT);
 }

@@ -3,6 +3,7 @@ import { $, cv } from './util.js';
 import { draw, tfit } from './render.js';
 import { report } from './report.js';
 import { codeFit } from './code.js';
+import { integrityFor } from './scriptIntegrity.js';
 
 export function resize() {
   const r = $('#main').getBoundingClientRect(),
@@ -59,7 +60,7 @@ export const css = n => CC[n] || (CC[n] = getComputedStyle(document.documentElem
 ST.PERF = '';
 try {
   ST.PERF = localStorage.getItem('sketchbooks-lite') || '';
-} catch (e) {}
+} catch (e) { report(e, 'Performance preference could not be read', { quiet: true }); }
 ST.BATLOW = false;
 export const COARSE = matchMedia('(pointer:coarse)').matches;
 export const FSOK = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
@@ -73,9 +74,11 @@ export const THC = new Map();
 export function loadScript(u) {
   return new Promise((ok, no) => {
     const s = document.createElement('script');
+    s.integrity = integrityFor(u);
+    s.crossOrigin = 'anonymous';
     s.src = u;
     s.onload = ok;
-    s.onerror = no;
+    s.onerror = () => no(new Error('Script could not be loaded or verified: ' + u));
     document.head.appendChild(s);
   });
 }

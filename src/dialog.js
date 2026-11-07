@@ -1,6 +1,7 @@
 // Modal choice dialog built on <dialog> (focus trap, Esc handling and screen-reader role come free).
-// Resolves with the `value` of the chosen button. Esc is blocked: the caller needs an answer.
-export function askChoice(title, text, choices) {
+// Resolves with the `value` of the chosen button. Esc is blocked unless `dismiss` is given: then Esc
+// (and its value) is a valid answer; without it the caller needs a real decision (e.g. the sync conflict).
+export function askChoice(title, text, choices, dismiss) {
   return new Promise(resolve => {
     const d = document.createElement('dialog');
     d.className = 'choice';
@@ -20,12 +21,16 @@ export function askChoice(title, text, choices) {
       row.append(b);
     });
     d.append(h, p, row);
-    d.addEventListener('cancel', e => e.preventDefault());
+    d.addEventListener('cancel', e => {
+      if (dismiss === undefined) e.preventDefault();
+      else d.returnValue = dismiss;
+    });
     d.addEventListener('close', () => {
-      d.remove();
+      setTimeout(() => d.remove(), 250); // stays in the DOM while its fade-out plays
       resolve(d.returnValue);
     });
     document.body.append(d);
     d.showModal();
+    row.firstChild.focus();
   });
 }

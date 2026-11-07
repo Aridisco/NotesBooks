@@ -198,9 +198,15 @@ export function openCell(e, i, j) {
   };
   grow();
   inp.addEventListener('input', grow);
+  // Focus now so keys typed right after Tab land in the new cell; the timeout re-focuses only if a
+  // pointer press (table just placed, cell tapped) moved focus away after this ran.
+  inp.focus();
+  inp.select();
   setTimeout(() => {
-    inp.focus();
-    inp.select();
+    if (ST.ed === inp && document.activeElement !== inp) {
+      inp.focus();
+      inp.select();
+    }
   }, 0);
   const done = nx => {
     if (ST.ed !== inp) return;
@@ -223,7 +229,7 @@ export function openCell(e, i, j) {
       // walk to the next visible cell, skipping cells hidden inside a merge
       let k = i * e.nc + j;
       do k += nx; while (k >= 0 && k < e.nr * e.nc && covered(e, Math.floor(k / e.nc), k % e.nc));
-      if (k >= 0 && k < e.nr * e.nc) setTimeout(() => openCell(e, Math.floor(k / e.nc), k % e.nc), 0);
+      if (k >= 0 && k < e.nr * e.nc) openCell(e, Math.floor(k / e.nc), k % e.nc);
     } else props();
   };
   inp.addEventListener('blur', () => done(0));

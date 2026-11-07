@@ -18,9 +18,8 @@ export function chunks(j) {
   return o.length ? o : [''];
 }
 
-// Group write ops into batches under Firestore's limits. `last` (the meta write) always goes in
-// the final batch, so other devices only see the new version once every page chunk is stored.
-// shortcut: a flush bigger than one batch is not atomic across batches, only the meta-last order protects it.
+// Only write immutable page versions before `last` publishes their references in meta.
+// Putting meta last is not sufficient if earlier batches overwrite published chunks.
 export function planBatches(ops, last, maxOps = 400, maxBytes = 8e6) {
   const size = o => ((o.data && o.data.d) || '').length * 3; // UTF-16 length x3 covers worst-case UTF-8
   const out = [];
@@ -36,6 +35,49 @@ export function planBatches(ops, last, maxOps = 400, maxBytes = 8e6) {
   }
   out.push(cur);
   return out;
+}
+
+export const pageDoc = (id, revision, i) => 'p_' + id + '_' + revision + '_' + i;
+
+// Decode only pages referenced by this meta snapshot; incomplete, unpublished versions are ignored.
+export function decodePages(meta, docs) {
+  if (!meta || !Array.isArray(meta.nbs) || !meta.nbs.length) throw new Error('Invalid cloud notebooks');
+  const pages = new Map(), known = new Map();
+  for (const n of meta.nbs) {
+    if (!n || !Array.isArray(n.pages) || !n.pages.length) throw new Error('Invalid cloud pages');
+    for (const p of n.pages) {
+      try {
+        if (!p || typeof p.id !== 'string' || !p.id || pages.has(p.id)) throw new Error('Invalid page identity');
+        let parts = [], version;
+        if (p.revision !== undefined || p.chunks !== undefined) {
+          if (typeof p.revision !== 'string' || !/^[a-z0-9-]+$/.test(p.revision) ||
+              !Number.isInteger(p.chunks) || p.chunks < 1 || p.chunks > docs.size) throw new Error('Invalid page version');
+          for (let i = 0; i < p.chunks; i++) parts.push(docs.get(pageDoc(p.id, p.revision, i)));
+          version = { revision: p.revision, chunks: p.chunks };
+        } else {
+          const prefix = 'p_' + p.id + '_';
+          for (const [id, d] of docs) {
+            const suffix = id.slice(prefix.length);
+            if (id.startsWith(prefix) && /^\d+$/.test(suffix)) {
+              const i = Number(suffix);
+              if (!Number.isSafeInteger(i) || i >= docs.size) throw new Error('Invalid chunk index');
+              parts[i] = d;
+            }
+          }
+          version = { chunks: parts.length };
+          if (!parts.length) parts = [docs.get('p_' + p.id)];
+        }
+        for (let i = 0; i < parts.length; i++) if (typeof parts[i] !== 'string') throw new Error('Missing chunk');
+        const els = JSON.parse(parts.join('')).els;
+        if (!Array.isArray(els)) throw new Error('Invalid page contents');
+        pages.set(p.id, els);
+        known.set(p.id, version);
+      } catch (e) {
+        throw new Error('The cloud copy of ' + (p?.name || p?.id || 'a page') + ' is damaged. Nothing was replaced.', { cause: e });
+      }
+    }
+  }
+  return { pages, known };
 }
 
 // Decide what to do when the cloud `meta` document is newer than what this device last synced.
